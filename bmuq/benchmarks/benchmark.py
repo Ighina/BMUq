@@ -1,0 +1,440 @@
+"""
+Main benchmarking framework for BMUq.
+"""
+
+import json
+import time
+from datetime import datetime
+from pathlib import Path
+from dataclasses import dataclass, field
+from typing import List, Dict, Optional, Any, Union, Tuple
+
+from ..config.settings import BMUqConfig
+from ..models.base import BaseLLM
+from ..uncertainty.selfcheck import SelfCheck
+from ..uncertainty.base_methods import (
+    EntropyBasedUQ,
+    ConsistencyBasedUQ,
+    RandomBaselineUQ,
+)
+from ..uncertainty.uq_methods import (
+    SemanticEntropyBasedUQ,
+    SemanticEntropy,
+    EntailmentChecker,
+)
+from ..search.tree_search import TreeSearchCoT
+from ..search.beam_search import BeamSearchCoT
+from ..core.data_structures import ReasoningPath
+from .datasets import load_dataset, Dataset
+from .metrics import calculate_metrics, MetricResult
+from .evaluator import Evaluator
+
+
+@dataclass
+class BenchmarkResult:
+    """Results from running a benchmark."""
+
+    experiment_name: str
+    config: BMUqConfig
+    dataset_name: str
+    num_questions: int
+
+    # Timing information
+    start_time: datetime
+    end_time: datetime
+    total_runtime_seconds: float
+
+    # Results per question
+    question_results: List[Dict[str, Any]]
+
+    # Aggregated metrics
+    metrics: Dict[str, MetricResult]
+
+    # Statistics
+    success_rate: float  # Fraction of questions successfully processed
+    average_confidence: float
+    average_path_length: float
+
+    # LLM usage statistics
+    llm_stats: Dict[str, Any]
+
+    # Additional metadata
+    metadata: Dict[str, Any] = field(default_factory=dict)
+
+    def to_dict(self) -> Dict[str, Any]:
+        """Convert benchmark result to dictionary for serialization."""
+        return {
+            "experiment_name": self.experiment_name,
+            "config": self.config.to_dict(),
+            "dataset_name": self.dataset_name,
+            "num_questions": self.num_questions,
+            "start_time": self.start_time.isoformat(),
+            "end_time": self.end_time.isoformat(),
+            "total_runtime_seconds": self.total_runtime_seconds,
+            "question_results": self.question_results,
+            "metrics": {
+                name: result.to_dict() for name, result in self.metrics.items()
+            },
+            "success_rate": self.success_rate,
+            "average_confidence": self.average_confidence,
+            "average_path_length": self.average_path_length,
+            "llm_stats": self.llm_stats,
+            "metadata": self.metadata,
+        }
+
+    def save(self, output_path: Union[str, Path]) -> None:
+        """Save benchmark result to file."""
+        output_path = Path(output_path)
+        output_path.parent.mkdir(parents=True, exist_ok=True)
+
+        with open(output_path, "w") as f:
+            json.dump(self.to_dict(), f, indent=2, default=str)
+
+        print(f"Benchmark results saved to: {output_path}")
+
+
+class BMUqBenchmark:
+    """
+    Main benchmark class for evaluating uncertainty quantification methods.
+    """
+
+    def __init__(self, config: BMUqConfig):
+        """
+        Initialize benchmark with configuration.
+
+        Args:
+            config: BMUq configuration
+        """
+        self.config = config
+        self.evaluator = Evaluator()
+
+        # Initialize components based on config
+        self.llm = self._create_llm()
+        self.uncertainty_method = self._create_uncertainty_method()
+        self.search_algorithm = self._create_search_algorithm()
+
+    def run(
+        self,
+        dataset: Optional[Dataset] = None,
+        num_questions: Optional[int] = None,
+        save_results: bool = True,
+        output_dir: Optional[str] = None,
+    ) -> BenchmarkResult:
+        """
+        Run benchmark evaluation.
+
+        Args:
+            dataset: Dataset to evaluate on (if None, loads from config)
+            num_questions: Number of questions to evaluate (if None, uses config)
+            save_results: Whether to save results to disk
+            output_dir: Directory to save results (if None, uses config)
+
+        Returns:
+            BenchmarkResult containing evaluation results
+        """
+        start_time = datetime.now()
+
+        # Load dataset if not provided
+        if dataset is None:
+            dataset = load_dataset(
+                self.config.benchmark.dataset, data_path=self.config.benchmark.data_path
+            )
+
+        # Determine number of questions
+        if num_questions is None:
+            num_questions = self.config.benchmark.num_questions
+        if num_questions is None:
+            num_questions = len(dataset)
+
+        num_questions = min(num_questions, len(dataset))
+
+        print(f"Starting benchmark: {self.config.experiment_name}")
+        print(f"Dataset: {dataset.name} ({num_questions} questions)")
+        print(f"Method: {self.config.uncertainty.method}")
+        print(f"Search: {self.config.search.algorithm}")
+        print("-" * 60)
+
+        # Run evaluation on each question
+        question_results = []
+        successful_evaluations = 0
+
+        for i in range(num_questions):
+            question = dataset[i]
+
+            if self.config.benchmark.verbose:
+                print(f"Question {i+1}/{num_questions}: Processing...")
+
+            try:
+                # Run search to find reasoning paths
+                paths = self.search_algorithm.search(
+                    question["question"], num_solutions=3, verbose=False
+                )
+
+                # Select best path
+                best_path = paths[0] if paths else None
+
+                if best_path:
+                    # Evaluate the path
+                    result = self.evaluator.evaluate_question(
+                        question=question,
+                        predicted_path=best_path,
+                        uncertainty_method=self.uncertainty_method,
+                        search_algorithm=self.search_algorithm,
+                    )
+
+                    question_results.append(result)
+                    successful_evaluations += 1
+
+                    if self.config.benchmark.verbose:
+                        print(f"  Confidence: {best_path.total_confidence:.3f}")
+                        print(f"  Path length: {len(best_path.steps)} steps")
+                else:
+                    # No paths found
+                    question_results.append(
+                        {
+                            "question_id": i,
+                            "question": question["question"],
+                            "error": "No reasoning paths found",
+                            "success": False,
+                        }
+                    )
+
+            except Exception as e:
+                print(f"  Error processing question {i+1}: {e}")
+                question_results.append(
+                    {
+                        "question_id": i,
+                        "question": question["question"],
+                        "error": str(e),
+                        "success": False,
+                    }
+                )
+
+        end_time = datetime.now()
+        total_runtime = (end_time - start_time).total_seconds()
+
+        # Calculate aggregated metrics
+        metrics = calculate_metrics(question_results, self.config.benchmark.metrics)
+
+        # Calculate summary statistics
+        successful_results = [r for r in question_results if r.get("success", False)]
+
+        success_rate = successful_evaluations / num_questions
+        average_confidence = sum(
+            r.get("confidence", 0) for r in successful_results
+        ) / max(1, len(successful_results))
+        average_path_length = sum(
+            r.get("path_length", 0) for r in successful_results
+        ) / max(1, len(successful_results))
+
+        # Get LLM usage statistics
+        llm_stats = (
+            self.llm.get_usage_stats().to_dict()
+            if hasattr(self.llm.get_usage_stats(), "to_dict")
+            else vars(self.llm.get_usage_stats())
+        )
+
+        # Create benchmark result
+        result = BenchmarkResult(
+            experiment_name=self.config.experiment_name,
+            config=self.config,
+            dataset_name=dataset.name,
+            num_questions=num_questions,
+            start_time=start_time,
+            end_time=end_time,
+            total_runtime_seconds=total_runtime,
+            question_results=question_results,
+            metrics=metrics,
+            success_rate=success_rate,
+            average_confidence=average_confidence,
+            average_path_length=average_path_length,
+            llm_stats=llm_stats,
+            metadata={
+                "search_stats": (
+                    self.search_algorithm.get_search_statistics()
+                    if hasattr(self.search_algorithm, "get_search_statistics")
+                    else {}
+                ),
+                "uncertainty_info": self.uncertainty_method.get_method_info(),
+            },
+        )
+
+        print("-" * 60)
+        print(f"Benchmark completed in {total_runtime:.2f} seconds")
+        print(
+            f"Success rate: {success_rate:.3f} ({successful_evaluations}/{num_questions})"
+        )
+        print(f"Average confidence: {average_confidence:.3f}")
+        print(f"Average path length: {average_path_length:.1f} steps")
+
+        # Save results if requested
+        if save_results:
+            output_dir = output_dir or self.config.benchmark.output_dir
+            output_path = (
+                Path(output_dir)
+                / f"{self.config.experiment_name}_{datetime.now().strftime('%Y%m%d_%H%M%S')}.json"
+            )
+            result.save(output_path)
+
+        return result
+
+    def run_comparison(
+        self,
+        uncertainty_methods: List[str],
+        dataset: Optional[Dataset] = None,
+        num_questions: Optional[int] = None,
+    ) -> Dict[str, BenchmarkResult]:
+        """
+        Run comparison across multiple uncertainty quantification methods.
+
+        Args:
+            uncertainty_methods: List of method names to compare
+            dataset: Dataset to evaluate on
+            num_questions: Number of questions to evaluate
+
+        Returns:
+            Dictionary mapping method names to benchmark results
+        """
+        results = {}
+        original_method = self.config.uncertainty.method
+
+        for method in uncertainty_methods:
+            print(f"\n{'='*60}")
+            print(f"Running comparison: {method}")
+            print(f"{'='*60}")
+
+            # Update config for this method
+            self.config.uncertainty.method = method
+            self.config.experiment_name = f"{self.config.experiment_name}_{method}"
+
+            # Recreate uncertainty method
+            self.uncertainty_method = self._create_uncertainty_method()
+            self.search_algorithm = (
+                self._create_search_algorithm()
+            )  # Recreate with new uncertainty method
+
+            # Run benchmark
+            result = self.run(dataset, num_questions, save_results=True)
+            results[method] = result
+
+        # Restore original configuration
+        self.config.uncertainty.method = original_method
+
+        return results
+
+    def _create_llm(self) -> BaseLLM:
+        """Create LLM instance based on configuration."""
+        llm_config = self.config.llm
+
+        if llm_config.provider == "openai":
+            from ..models.openai_llm import OpenAILLM
+
+            return OpenAILLM(
+                api_key=llm_config.api_key,
+                model=llm_config.model,
+                temperature=llm_config.temperature,
+                max_retries=llm_config.max_retries,
+            )
+        elif llm_config.provider == "huggingface":
+            try:
+                from ..models.huggingface_llm import HuggingFaceLLM
+
+                return HuggingFaceLLM(
+                    model_name=llm_config.model,
+                    device=llm_config.hf_device,
+                    temperature=llm_config.temperature,
+                    max_retries=llm_config.max_retries,
+                    max_new_tokens=llm_config.max_tokens,
+                    use_quantization=llm_config.hf_use_quantization,
+                    load_in_8bit=llm_config.hf_load_in_8bit,
+                    load_in_4bit=llm_config.hf_load_in_4bit,
+                    **llm_config.extra_params,
+                )
+            except ImportError:
+                raise ValueError(
+                    "HuggingFace transformers not installed. Install with: pip install transformers torch"
+                )
+        elif llm_config.provider == "ollama":
+            try:
+                from ..models.ollama_llm import OllamaLLM
+
+                return OllamaLLM(
+                    model=llm_config.model,
+                    base_url=llm_config.ollama_base_url,
+                    temperature=llm_config.temperature,
+                    max_retries=llm_config.max_retries,
+                    timeout=int(llm_config.timeout),
+                    system_prompt=llm_config.ollama_system_prompt,
+                )
+            except ImportError:
+                raise ValueError(
+                    "Requests library not installed. Install with: pip install requests"
+                )
+        elif llm_config.provider == "mock":
+            from ..models.mock_llm import MockLLM
+
+            return MockLLM(
+                model=llm_config.model,
+                temperature=llm_config.temperature,
+                max_retries=llm_config.max_retries,
+            )
+        else:
+            raise ValueError(f"Unsupported LLM provider: {llm_config.provider}")
+
+    def _create_uncertainty_method(self):
+        """Create uncertainty quantification method based on configuration."""
+        method_name = self.config.uncertainty.method
+
+        if method_name == "selfcheck":
+            return SelfCheck(
+                self.llm,
+                lambda_neg1=self.config.uncertainty.lambda_neg1,
+                lambda_0=self.config.uncertainty.lambda_0,
+            )
+        elif method_name == "entropy_based":
+            return EntropyBasedUQ(
+                self.llm,
+                num_samples=self.config.uncertainty.num_samples,
+                temperature=self.config.uncertainty.sampling_temperature,
+            )
+        elif method_name == "consistency_based":
+            return ConsistencyBasedUQ(self.llm)
+        elif method_name == "random_baseline":
+            return RandomBaselineUQ(seed=self.config.random_seed)
+        elif method_name == "semantic_entropy":
+            return SemanticEntropyBasedUQ(
+                semantic_entropy=SemanticEntropy(
+                    entailment_checker=EntailmentChecker.from_pretrained(
+                        self.config.uncertainty.entailment_model
+                    ),
+                    strict_entailment=self.config.uncertainty.strict_entailment,
+                    verbose=self.config.uncertainty.verbose,
+                ),
+                add_consistency=self.config.uncertainty.add_consistency,
+            )
+        else:
+            raise ValueError(f"Unsupported uncertainty method: {method_name}")
+
+    def _create_search_algorithm(self):
+        """Create search algorithm based on configuration."""
+        algorithm_name = self.config.search.algorithm
+
+        if algorithm_name == "tree_search":
+            return TreeSearchCoT(
+                llm=self.llm,
+                uncertainty_method=self.uncertainty_method,
+                beam_width=self.config.search.beam_width,
+                max_depth=self.config.search.max_depth,
+                confidence_threshold=self.config.search.confidence_threshold,
+                exploration_weight=self.config.search.exploration_weight,
+            )
+        elif algorithm_name == "beam_search":
+            return BeamSearchCoT(
+                llm=self.llm,
+                uncertainty_method=self.uncertainty_method,
+                beam_width=self.config.search.beam_width,
+                max_depth=self.config.search.max_depth,
+                diversity_penalty=self.config.search.diversity_penalty,
+            )
+        else:
+            raise ValueError(f"Unsupported search algorithm: {algorithm_name}")
