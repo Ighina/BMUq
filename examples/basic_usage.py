@@ -3,8 +3,8 @@ Basic usage example for BMUq - SelfCheck with Tree Search
 """
 
 import os
-from bmuq import BMUqConfig, BMUqBenchmark
-from bmuq.config import get_preset_config
+from bmuq.config import BMUqConfig, get_preset_config
+from bmuq.benchmarks import BMUqBenchmark
 from bmuq.benchmarks import create_dataset_from_questions
 
 def main():

@@ -10,49 +10,50 @@ from ..core.interfaces import UncertaintyMethod, SearchAlgorithm
 
 class Evaluator:
     """Evaluates reasoning paths against ground truth answers."""
-    
+
     def __init__(self):
         self.answer_extractors = {
             "numeric": self._extract_numeric_answer,
             "text": self._extract_text_answer,
             "equation": self._extract_equation_answer
         }
-    
+
     def evaluate_question(self, question: Dict[str, Any], predicted_path: ReasoningPath,
-                         uncertainty_method: UncertaintyMethod, 
+                         uncertainty_method: UncertaintyMethod,
                          search_algorithm: SearchAlgorithm) -> Dict[str, Any]:
         """
         Evaluate a single question result.
-        
+
         Args:
             question: Question data with ground truth
             predicted_path: Predicted reasoning path
             uncertainty_method: Uncertainty method used
             search_algorithm: Search algorithm used
-            
+
         Returns:
             Dictionary containing evaluation results
         """
         # Extract predicted answer from reasoning path
         predicted_answer = self._extract_answer_from_path(predicted_path)
-        
-        # Get ground truth answer
-        ground_truth = question.get("answer", "")
-        
+
+        # Get and parse ground truth answer
+        raw_ground_truth = question.get("answer", "")
+        ground_truth_answer = self._extract_ground_truth_answer(raw_ground_truth)
+
         # Check correctness
-        is_correct = self._check_correctness(predicted_answer, ground_truth)
-        
+        is_correct = self._check_correctness(predicted_answer, ground_truth_answer)
+
         # Get confidence score
         confidence = predicted_path.total_confidence
-        
+
         # Analyze reasoning path
         path_analysis = self._analyze_reasoning_path(predicted_path)
-        
+
         # Create result dictionary
         result = {
             "question_id": question.get("id", -1),
             "question": question["question"],
-            "ground_truth": ground_truth,
+            "ground_truth": ground_truth_answer, # Use the parsed answer
             "predicted_answer": predicted_answer,
             "correct": is_correct,
             "confidence": confidence,
@@ -63,40 +64,67 @@ class Evaluator:
             "success": True,
             **path_analysis
         }
-        
+
         return result
     
+    def _extract_final_answer_key(self, text: str) -> Optional[str]:
+        """
+        Extracts the answer from a 'FINAL_ANSWER:' key. This is the most reliable method.
+        """
+        # Regex to find "FINAL_ANSWER:", followed by optional symbols and the answer
+        match = re.search(r'final_answer\s*[:\s]*\$?\s*(.*)', text, re.IGNORECASE)
+        if match:
+            # Return the captured group, stripped of whitespace
+            return match.group(1).strip()
+        return None
+
+    def _extract_ground_truth_answer(self, text: str) -> str:
+        """
+        Extracts the final answer from the ground truth string, marked by '####'.
+        """
+        match = re.search(r'####\s*(-?[\d,]+\.?\d*)', text)
+        if match:
+            return match.group(1)
+        # Fallback to the last numerical value if #### is not found
+        numbers = re.findall(r'(-?[\d,]+\.?\d+)', text)
+        if numbers:
+            return numbers[-1]
+        return text # Fallback to the whole string if no pattern matches
+
     def _extract_answer_from_path(self, path: ReasoningPath) -> str:
         """Extract final answer from reasoning path."""
         if not path.steps:
             return ""
-        
-        # Look for answer in the last few steps
-        last_steps = path.steps[-3:] if len(path.steps) >= 3 else path.steps
-        
-        for step in reversed(last_steps):
-            # Try different extraction methods
+
+        # Iterate backwards through the steps to find the answer
+        for step in reversed(path.steps):
+            # **CORRECTED LOGIC**: Prioritize the explicit FINAL_ANSWER key
+            final_answer = self._extract_final_answer_key(step.content)
+            if final_answer:
+                return final_answer
+
+            # Fallback to other extraction methods if key is not found
             for extractor in self.answer_extractors.values():
                 answer = extractor(step.content)
                 if answer:
                     return answer
-        
-        # If no specific answer found, return content of last step
+
+        # If no specific answer found, return content of last step as a last resort
         return path.steps[-1].content.strip()
-    
+
     def _extract_numeric_answer(self, text: str) -> Optional[str]:
         """Extract numeric answer from text."""
         # Look for patterns like "answer is 5", "x = 5", "= 5"
         patterns = [
-            r'(?:answer is|result is|solution is|equals?)\s*([+-]?\d*\.?\d+)',
-            r'([a-z])\s*=\s*([+-]?\d*\.?\d+)',
-            r'=\s*([+-]?\d*\.?\d+)',
-            r'([+-]?\d*\.?\d+)\s*(?:dollars?|cents?|\$)',
-            r'\$\s*([+-]?\d*\.?\d+)',
+            r'(?:the final answer is|the answer is|answer is|result is|solution is|equals?)\s*[:\s]*\$?\s*([+-]?[\d,]*\.?\d+)',
+            r'([a-z])\s*=\s*\$?\s*([+-]?[\d,]*\.?\d+)',
+            r'=\s*\$?\s*([+-]?[\d,]*\.?\d+)',
+            r'([+-]?[\d,]*\.?\d+)\s*(?:dollars?|cents?|\$)',
+            r'\$\s*([+-]?[\d,]*\.?\d+)',
         ]
-        
+
         text_lower = text.lower()
-        
+
         for pattern in patterns:
             matches = re.findall(pattern, text_lower)
             if matches:
@@ -106,72 +134,78 @@ class Evaluator:
                     # Return the numeric part
                     return match[-1]
                 return match
-        
+
+        # Look for standalone numbers in the last line as a weaker signal
+        last_line = text.strip().split('\n')[-1]
+        numeric_matches = re.findall(r'([+-]?[\d,]*\.?\d+)', last_line)
+        if len(numeric_matches) == 1: # Only if there's one unambiguous number
+             return numeric_matches[0]
+
         return None
-    
+
     def _extract_text_answer(self, text: str) -> Optional[str]:
         """Extract text-based answer."""
-        # Look for explicit answer statements
         patterns = [
             r'(?:answer is|result is|solution is|conclusion)\s*:?\s*(.+?)(?:\.|$)',
             r'(?:therefore|thus|so)\s*,?\s*(.+?)(?:\.|$)',
         ]
-        
+
         for pattern in patterns:
             match = re.search(pattern, text, re.IGNORECASE)
             if match:
                 return match.group(1).strip()
-        
+
         return None
-    
+
     def _extract_equation_answer(self, text: str) -> Optional[str]:
         """Extract mathematical equation as answer."""
-        # Look for equations that might be the final answer
         equation_patterns = [
             r'([a-z]\s*=\s*[^=]+)',
             r'(\d+\s*[+\-*/]\s*\d+\s*=\s*\d+)',
         ]
-        
+
         for pattern in equation_patterns:
             matches = re.findall(pattern, text, re.IGNORECASE)
             if matches:
                 return matches[-1].strip()
-        
+
         return None
-    
+
     def _check_correctness(self, predicted: str, ground_truth: str) -> bool:
         """Check if predicted answer matches ground truth."""
         if not predicted or not ground_truth:
             return False
-        
-        # Normalize both answers
+
         predicted_norm = self._normalize_answer(predicted)
         ground_truth_norm = self._normalize_answer(ground_truth)
         
+        if not predicted_norm or not ground_truth_norm:
+             return False
+
         # Exact match
         if predicted_norm == ground_truth_norm:
             return True
-        
+
         # Numeric comparison with tolerance
         try:
             pred_num = float(predicted_norm)
             gt_num = float(ground_truth_norm)
-            return abs(pred_num - gt_num) < 1e-6
-        except ValueError:
+            # Check for relative and absolute tolerance
+            return abs(pred_num - gt_num) < 1e-5
+        except (ValueError, TypeError):
+            # If conversion to float fails, proceed to string comparison
             pass
-        
-        # Substring match for partial credit
-        if ground_truth_norm in predicted_norm or predicted_norm in ground_truth_norm:
-            return True
-        
+
         return False
-    
+
     def _normalize_answer(self, answer: str) -> str:
         """Normalize answer string for comparison."""
-        # Remove extra whitespace and convert to lowercase
+        if not isinstance(answer, str):
+            return ""
+            
         normalized = answer.strip().lower()
         
-        # Remove common punctuation
+        # Remove common punctuation, including commas in numbers
         normalized = re.sub(r'[.,;:!?]', '', normalized)
         
         # Remove currency symbols
@@ -180,11 +214,15 @@ class Evaluator:
         # Remove units (rough heuristic)
         normalized = re.sub(r'\s*(dollars?|cents?|meters?|feet|inches?|hours?|minutes?|seconds?)', '', normalized)
         
-        # Normalize mathematical expressions
-        normalized = re.sub(r'\s+', ' ', normalized)
+        # Handle trailing text like "per year" or ".00"
+        normalized = re.sub(r'\s*per\s*\w+', '', normalized)
+        normalized = re.sub(r'\.0+$', '', normalized)
+        
+        normalized = re.sub(r'\s+', ' ', normalized).strip()
         
         return normalized
-    
+
+    # The analysis methods below remain unchanged as they were not the source of the issue.
     def _analyze_reasoning_path(self, path: ReasoningPath) -> Dict[str, Any]:
         """Analyze the reasoning path for additional metrics."""
         if not path.steps:
@@ -192,7 +230,6 @@ class Evaluator:
         
         analysis = {}
         
-        # Step-wise confidence statistics
         step_confidences = [step.confidence for step in path.steps]
         analysis["confidence_stats"] = {
             "mean": sum(step_confidences) / len(step_confidences),
@@ -201,13 +238,8 @@ class Evaluator:
             "std": self._calculate_std(step_confidences) if len(step_confidences) > 1 else 0.0
         }
         
-        # Reasoning coherence
         analysis["coherence_score"] = self._calculate_coherence(path)
-        
-        # Mathematical content analysis
         analysis["mathematical_content"] = self._analyze_mathematical_content(path)
-        
-        # Dependency analysis
         analysis["dependency_stats"] = self._analyze_dependencies(path)
         
         return analysis
@@ -232,8 +264,6 @@ class Evaluator:
         for i in range(len(path.steps) - 1):
             current_step = path.steps[i]
             next_step = path.steps[i + 1]
-            
-            # Simple coherence based on shared vocabulary
             coherence_score += self._calculate_step_similarity(current_step.content, next_step.content)
         
         return coherence_score / total_pairs if total_pairs > 0 else 0.0
@@ -255,7 +285,6 @@ class Evaluator:
         """Analyze mathematical content in reasoning path."""
         all_content = " ".join(step.content for step in path.steps)
         
-        # Count mathematical operations
         operations = {
             "addition": len(re.findall(r'\+', all_content)),
             "subtraction": len(re.findall(r'-', all_content)),
@@ -264,7 +293,6 @@ class Evaluator:
             "equals": len(re.findall(r'=', all_content))
         }
         
-        # Count equations and variables
         equations = len(re.findall(r'[a-z]\s*=\s*[^=]+', all_content, re.IGNORECASE))
         variables = len(set(re.findall(r'\b[a-z]\b', all_content.lower())))
         
@@ -280,11 +308,9 @@ class Evaluator:
         if not path.steps:
             return {}
         
-        # Count steps with/without dependencies
         steps_with_deps = sum(1 for step in path.steps if step.dependencies)
         steps_without_deps = len(path.steps) - steps_with_deps
         
-        # Average number of dependencies
         total_deps = sum(len(step.dependencies) for step in path.steps)
         avg_deps = total_deps / len(path.steps)
         

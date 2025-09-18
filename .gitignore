@@ -1,10 +1,14 @@
 # Repo Specific
 
-llama31_gsm8k_config.yaml
-results_*/
+results*/
 og.ipynb
-quick_llama_31_gsmk8k.py
-run_llama31_gsm8k.py
+quick_*
+run_*
+*.yaml
+demo_*
+
+# UV 
+uv.*
 
 # Byte-compiled / optimized / DLL files
 __pycache__/

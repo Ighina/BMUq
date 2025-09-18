@@ -127,8 +127,6 @@ class BeamSearchCoT(BaseSearchAlgorithm):
                         #     )
                         # total_score = group_entropy + consistency_score
 
-                        # TODO: in theory assigning is redundant since it already uses add_uncertainty_score in the evaluate_step
-
                         cand.uncertainty_scores[self.uncertainty_method.name] = (
                             self.uncertainty_method.evaluate_step(
                                 group_entropy, cand, parent_beam.steps

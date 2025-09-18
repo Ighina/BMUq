@@ -4,6 +4,7 @@ Dataset loading and management for benchmarking.
 
 import json
 import csv
+from datasets import load_dataset as ld
 from abc import ABC, abstractmethod
 from typing import List, Dict, Any, Optional, Union
 from pathlib import Path
@@ -108,7 +109,10 @@ class GSM8KDataset(Dataset):
                 raw_data = [json.loads(line) for line in f]
         else:
             # Use built-in sample data for demonstration
-            raw_data = self._get_sample_gsm8k_data()
+            try:
+                raw_data = ld("gsm8k", "main")["test"]
+            except:
+                raw_data = self._get_sample_gsm8k_data()
         
         # Convert to standard format
         self._data = []

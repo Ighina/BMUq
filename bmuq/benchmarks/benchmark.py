@@ -22,6 +22,7 @@ from ..uncertainty.uq_methods import (
     SemanticEntropy,
     EntailmentChecker,
 )
+from ..uncertainty.coherence_uq import CoherenceBasedUQ
 from ..search.tree_search import TreeSearchCoT
 from ..search.beam_search import BeamSearchCoT
 from ..core.data_structures import ReasoningPath
@@ -411,6 +412,18 @@ class BMUqBenchmark:
                     verbose=self.config.uncertainty.verbose,
                 ),
                 add_consistency=self.config.uncertainty.add_consistency,
+            )
+        elif method_name == "coherence_based":
+            # Get coherence-specific parameters from extra_params
+            extra_params = self.config.uncertainty.extra_params
+            coherence_method = extra_params.get("coherence_method", "mean_cosine_similarity")
+            model_name = extra_params.get("model_name", "all-MiniLM-L6-v2")
+            decay = extra_params.get("decay", 0.9)
+            
+            return CoherenceBasedUQ(
+                model_name=model_name,
+                coherence_method=coherence_method,
+                decay=decay
             )
         else:
             raise ValueError(f"Unsupported uncertainty method: {method_name}")

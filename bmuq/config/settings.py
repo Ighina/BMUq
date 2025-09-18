@@ -170,6 +170,7 @@ class BMUqConfig:
             "consistency_based",
             "random_baseline",
             "semantic_entropy",
+            "coherence_based",
         ]
         if self.uncertainty.method not in valid_uncertainty_methods:
             issues.append(
