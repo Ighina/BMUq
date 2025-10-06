@@ -30,6 +30,7 @@ from ..core.data_structures import ReasoningPath
 from .datasets import load_dataset, Dataset
 from .metrics import calculate_metrics, MetricResult
 from .evaluator import Evaluator
+from .utils import set_nested_attribute
 
 
 @dataclass
@@ -292,14 +293,19 @@ class BMUqBenchmark:
     def run_comparison(
         self,
         uncertainty_methods: List[str],
+        additional_configuration: Dict[str, List] = {},
         dataset: Optional[Dataset] = None,
         num_questions: Optional[int] = None,
+        generated_outputs: List[str] = None
     ) -> Dict[str, BenchmarkResult]:
         """
         Run comparison across multiple uncertainty quantification methods.
 
         Args:
             uncertainty_methods: List of method names to compare
+            additional_configuration: a dictionary having keys equal to one or more listed uncertainty methods '
+                                      and values being List of different parameters to compare for that method
+                                      (each parameter should be a dictionary in the form {(tuple of path to parameter):value_of_parameter})  
             dataset: Dataset to evaluate on
             num_questions: Number of questions to evaluate
 
@@ -308,25 +314,35 @@ class BMUqBenchmark:
         """
         results = {}
         original_method = self.config.uncertainty.method
+        original_experiment_name = self.config.experiment_name
 
         for method in uncertainty_methods:
             print(f"\n{'='*60}")
             print(f"Running comparison: {method}")
             print(f"{'='*60}")
 
-            # Update config for this method
-            self.config.uncertainty.method = method
-            self.config.experiment_name = f"{self.config.experiment_name}_{method}"
+            if method in additional_configuration:
 
-            # Recreate uncertainty method
-            self.uncertainty_method = self._create_uncertainty_method()
-            self.search_algorithm = (
-                self._create_search_algorithm()
-            )  # Recreate with new uncertainty method
+                for parameter in additional_configuration[method]:
 
-            # Run benchmark
-            result = self.run(dataset, num_questions, save_results=True)
-            results[method] = result
+                    path_to_attr = list(parameter.keys())
+                    value = list(parameter.keys())[0]
+                    set_nested_attribute(self.config, path_to_attr, value)
+                    # Update config for this method
+                    self.config.uncertainty.method = method
+                    self.config.experiment_name = f"{self.config.experiment_name}_{method}_{".".join(path_to_attr)}:{value}"
+
+                    # Recreate uncertainty method
+                    self.uncertainty_method = self._create_uncertainty_method()
+                    self.search_algorithm = (
+                        self._create_search_algorithm()
+                    )  # Recreate with new uncertainty method
+
+                    # Run benchmark
+                    result = self.run(dataset, num_questions, save_results=True)
+                    results["-".join([method]+path_to_attr)+":"+value] = result
+
+                    self.config.experiment_name = original_experiment_name
 
         # Restore original configuration
         self.config.uncertainty.method = original_method
