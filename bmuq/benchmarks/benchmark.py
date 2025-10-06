@@ -122,7 +122,8 @@ class BMUqBenchmark:
         num_questions: Optional[int] = None,
         save_results: bool = True,
         output_dir: Optional[str] = None,
-        generated_outputs: List[str] = None
+        generated_outputs: Union[str, List[Dict[str, List[str]]]] = None,
+        create_outputs: bool = False
     ) -> BenchmarkResult:
         """
         Run benchmark evaluation.
@@ -132,7 +133,8 @@ class BMUqBenchmark:
             num_questions: Number of questions to evaluate (if None, uses config)
             save_results: Whether to save results to disk
             output_dir: Directory to save results (if None, uses config)
-
+            generated_outputs: either the path to a json file or a list of dictionaries with the structure {id_of_dataset_instance:list_of_answers_to_the_dataset_instance}
+            create_outputs: whether to create and save the options for best of n method and then pass them as precomputed options
         Returns:
             BenchmarkResult containing evaluation results
         """
@@ -162,6 +164,25 @@ class BMUqBenchmark:
         question_results = []
         successful_evaluations = 0
 
+        if isinstance(generated_outputs, str):
+            with open(generated_outputs) as f:
+                generated_outputs = json.load(f)
+        elif create_outputs:
+            # TODO: test the precomputed outputs!
+            assert self.search_algorithm.name == "best_of_n_cot", "Only best of N method can be used with create_outputs option!"
+            generated_outputs = []
+            for i in range(num_questions):
+                question = dataset[i]
+
+                current_beams = [ReasoningPath(steps=[], path_id=f"beam_{idx}") for idx in range(self.beam_width)]
+                beam_width = self.config.search.beam_width
+                candidates, answers = self.search_algorithm.generate_next_steps(question["question"], current_beams, beam_width)
+
+                generated_outputs.append({"reasonings": candidates, "answers": answers})
+            
+            with open(f"{self.config.benchmark.dataset}-generated-outputs-{beam_width}.json", "w") as f:
+                json.dump(generated_outputs, f)
+
         for i in range(num_questions):
             question = dataset[i]
 
@@ -172,8 +193,11 @@ class BMUqBenchmark:
                 # Run search to find reasoning paths
                 # TODO: implement answers extraction for other search algorithms too
                 if self.search_algorithm.name == "best_of_n_cot":
+                    
+                    precomputed_dictionary = generated_outputs[i] if generated_outputs else None
+
                     paths, answers = self.search_algorithm.search(
-                        question["question"], num_solutions=3, verbose=False, generated_outputs = generated_outputs
+                        question["question"], num_solutions=3, verbose=False, generated_outputs = precomputed_dictionary
                     )
                     
                 else:
@@ -296,7 +320,7 @@ class BMUqBenchmark:
         additional_configuration: Dict[str, List] = {},
         dataset: Optional[Dataset] = None,
         num_questions: Optional[int] = None,
-        generated_outputs: List[str] = None
+        generated_outputs: Union[str, List[Dict[str, List[str]]]] = None
     ) -> Dict[str, BenchmarkResult]:
         """
         Run comparison across multiple uncertainty quantification methods.
@@ -308,7 +332,7 @@ class BMUqBenchmark:
                                       (each parameter should be a dictionary in the form {(tuple of path to parameter):value_of_parameter})  
             dataset: Dataset to evaluate on
             num_questions: Number of questions to evaluate
-
+            generated_outputs: either the path to a json file or a list of dictionaries with the structure {id_of_dataset_instance:list_of_answers_to_the_dataset_instance}
         Returns:
             Dictionary mapping method names to benchmark results
         """
@@ -339,7 +363,7 @@ class BMUqBenchmark:
                     )  # Recreate with new uncertainty method
 
                     # Run benchmark
-                    result = self.run(dataset, num_questions, save_results=True)
+                    result = self.run(dataset, num_questions, save_results=True, generated_outputs=generated_outputs)
                     results["-".join([method]+path_to_attr)+":"+value] = result
 
                     self.config.experiment_name = original_experiment_name

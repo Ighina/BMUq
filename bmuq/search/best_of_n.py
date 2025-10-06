@@ -98,7 +98,8 @@ class BestNSearchCoT(BaseSearchAlgorithm):
 
         if generated_outputs is not None:
             # precomputed outputs, save computation and ensure fair comparison (it works by calling the generate_next_steps outside the logic)
-            completed_paths, answers = generated_outputs
+            completed_paths = generated_outputs["reasonings"]
+            answers = generated_outputs["answers"] 
         else:
             completed_paths, answers = self.generate_next_steps(question, current_beams, self.beam_width)
 
