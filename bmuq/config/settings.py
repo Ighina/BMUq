@@ -92,7 +92,7 @@ class SearchConfig:
     )
 
     structured_format: bool = True  # Whether to use structured format detection
-
+    structured_output: bool = False
     # Additional algorithm parameters
     extra_params: Dict[str, Any] = field(default_factory=dict)
 
@@ -171,6 +171,7 @@ class BMUqConfig:
             "random_baseline",
             "semantic_entropy",
             "coherence_based",
+            "relative_coherence_based"
         ]
         if self.uncertainty.method not in valid_uncertainty_methods:
             issues.append(
@@ -178,7 +179,7 @@ class BMUqConfig:
             )
 
         # Validate search config
-        valid_search_algorithms = ["tree_search", "beam_search"]
+        valid_search_algorithms = ["tree_search", "beam_search", "best_of_n"]
         if self.search.algorithm not in valid_search_algorithms:
             issues.append(f"Search algorithm must be one of: {valid_search_algorithms}")
 

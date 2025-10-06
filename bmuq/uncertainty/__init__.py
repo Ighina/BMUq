@@ -16,4 +16,6 @@ __all__ = [
     "SequentialConsistencyBasedUQ",
     "CoherenceBasedUQ",
     "create_coherence_uq",
+    "RelativeCoherenceBasedUQ",
+    "create_relative_coherence_uq"
 ]

@@ -207,7 +207,7 @@ class HuggingFaceLLM(BaseLLM):
             cached = torch.cuda.memory_reserved() / 1e9
             logger.info(f"CUDA memory - Allocated: {allocated:.2f} GB, Cached: {cached:.2f} GB")
 
-    def generate(self, prompt: str, max_tokens: int = 150, temperature: Optional[float] = None) -> str:
+    def generate(self, prompt: str, max_tokens: int = 150, temperature: Optional[float] = None, structured_output = None) -> str:
         """
         Generate text using the loaded model.
 
@@ -215,10 +215,14 @@ class HuggingFaceLLM(BaseLLM):
             prompt: Input prompt for generation
             max_tokens: Maximum tokens to generate
             temperature: Override default temperature
+            structured_output: A Pydantic class defining the format of the output (not implemented yet)
 
         Returns:
             Generated text response
         """
+        if self.structured_output is not None:
+            print("WARNING: the structured output is not available in Huggingface yet!")
+
         if self.model is None or self.tokenizer is None:
             raise RuntimeError("Model not loaded. Call _load_model() first.")
         

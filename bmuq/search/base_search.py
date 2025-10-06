@@ -6,7 +6,15 @@ from typing import List, Dict, Optional, Any
 from ..core.interfaces import SearchAlgorithm, UncertaintyMethod
 from ..core.data_structures import ReasoningStep, ReasoningPath
 from ..models.base import BaseLLM
+from pydantic import BaseModel
 
+class Step(BaseModel):
+    explanation: str
+    output: str
+
+class MathReasoning(BaseModel):
+    steps: list[Step]
+    final_answer: str
 
 class BaseSearchAlgorithm(SearchAlgorithm):
     """
@@ -15,7 +23,7 @@ class BaseSearchAlgorithm(SearchAlgorithm):
 
     def __init__(self, name: str, llm: BaseLLM, uncertainty_method: UncertaintyMethod,
                  max_depth: int = 8, completion_keywords: Optional[List[str]] = None,
-                 structured_format: bool = True):
+                 structured_format: bool = True, structured_output: bool = False):
         """
         Initialize base search algorithm.
 
@@ -26,11 +34,13 @@ class BaseSearchAlgorithm(SearchAlgorithm):
             max_depth: Maximum reasoning chain depth
             completion_keywords: Keywords that indicate solution completion (legacy)
             structured_format: Use structured FINAL_ANSWER format for completion detection
+            structured_output: Use structured output, providing the MathProblem class to the LLM
         """
         super().__init__(name, uncertainty_method)
         self.llm = llm
         self.max_depth = max_depth
         self.structured_format = structured_format
+        self.structured_output = structured_output
 
         # Default completion detection keywords (fallback)
         self.completion_keywords = completion_keywords or [
@@ -58,8 +68,15 @@ class BaseSearchAlgorithm(SearchAlgorithm):
         candidates = []
         for i in range(num_candidates):
             try:
-                response = self.llm.generate(prompt, max_tokens=200)
-                step_content = self._clean_step_response(response)
+                if self.structured_output:
+                    response = self.llm.generate(prompt, structured_output=MathReasoning)
+                    try:
+                        step_content = self._parse_structured_output(response)[-1]
+                    except:
+                        step_content = self.llm.generate(f"Find and return the last step in this reasoning chain: {response}. Return ONLY the last step as it is.")
+                else:
+                    response = self.llm.generate(prompt)
+                    step_content = self._clean_step_response(response)
                 
                 next_step_id = len(current_path.steps)
                 step = ReasoningStep(
@@ -197,6 +214,12 @@ Next step:"""
             cleaned = cleaned[0].upper() + cleaned[1:]
             
         return cleaned
+    
+    def _parse_structured_output(self, response: dict) -> str:
+        try:
+            return response.steps
+        except AttributeError:
+            return response
 
     def _has_numerical_answer(self, path: ReasoningPath) -> bool:
         """Check if path contains numerical answer indicating completion."""

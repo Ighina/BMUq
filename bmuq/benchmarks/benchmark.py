@@ -22,9 +22,10 @@ from ..uncertainty.uq_methods import (
     SemanticEntropy,
     EntailmentChecker,
 )
-from ..uncertainty.coherence_uq import CoherenceBasedUQ
+from ..uncertainty.coherence_uq import CoherenceBasedUQ, RelativeCoherenceBasedUQ
 from ..search.tree_search import TreeSearchCoT
 from ..search.beam_search import BeamSearchCoT
+from ..search.best_of_n import BestNSearchCoT
 from ..core.data_structures import ReasoningPath
 from .datasets import load_dataset, Dataset
 from .metrics import calculate_metrics, MetricResult
@@ -120,6 +121,7 @@ class BMUqBenchmark:
         num_questions: Optional[int] = None,
         save_results: bool = True,
         output_dir: Optional[str] = None,
+        generated_outputs: List[str] = None
     ) -> BenchmarkResult:
         """
         Run benchmark evaluation.
@@ -167,9 +169,16 @@ class BMUqBenchmark:
 
             try:
                 # Run search to find reasoning paths
-                paths = self.search_algorithm.search(
-                    question["question"], num_solutions=3, verbose=False
-                )
+                # TODO: implement answers extraction for other search algorithms too
+                if self.search_algorithm.name == "best_of_n_cot":
+                    paths, answers = self.search_algorithm.search(
+                        question["question"], num_solutions=3, verbose=False, generated_outputs = generated_outputs
+                    )
+                    
+                else:
+                    paths = self.search_algorithm.search(
+                        question["question"], num_solutions=3, verbose=False
+                    )
 
                 # Select best path
                 best_path = paths[0] if paths else None
@@ -178,9 +187,10 @@ class BMUqBenchmark:
                     # Evaluate the path
                     result = self.evaluator.evaluate_question(
                         question=question,
-                        predicted_path=best_path,
+                        predicted_path=(best_path, answers[0]),
                         uncertainty_method=self.uncertainty_method,
                         search_algorithm=self.search_algorithm,
+                        structured_output=self.config.search.structured_output
                     )
 
                     question_results.append(result)
@@ -425,6 +435,20 @@ class BMUqBenchmark:
                 coherence_method=coherence_method,
                 decay=decay
             )
+        elif method_name == "relative_coherence_based":
+            extra_params = self.config.uncertainty.extra_params
+            coherence_method = extra_params.get("coherence_method", "arp_pair")
+            model_name = extra_params.get("model_name", "all-MiniLM-L6-v2")
+            add_topic_score = extra_params.get("add_topic_score", False)
+            question_weight = extra_params.get("question_weight")
+
+            return RelativeCoherenceBasedUQ(
+                model_name=model_name,
+                coherence_method=coherence_method,
+                add_topic_score=add_topic_score,
+                question_weight=question_weight
+            )
+
         else:
             raise ValueError(f"Unsupported uncertainty method: {method_name}")
 
@@ -440,6 +464,7 @@ class BMUqBenchmark:
                 max_depth=self.config.search.max_depth,
                 confidence_threshold=self.config.search.confidence_threshold,
                 exploration_weight=self.config.search.exploration_weight,
+                structured_format=self.config.search.structured_format
             )
         elif algorithm_name == "beam_search":
             return BeamSearchCoT(
@@ -448,6 +473,15 @@ class BMUqBenchmark:
                 beam_width=self.config.search.beam_width,
                 max_depth=self.config.search.max_depth,
                 diversity_penalty=self.config.search.diversity_penalty,
+                structured_format=self.config.search.structured_format
+            )
+        elif algorithm_name == "best_of_n":
+            return BestNSearchCoT(
+                llm=self.llm,
+                uncertainty_method=self.uncertainty_method,
+                beam_width=self.config.search.beam_width,
+                structured_format=self.config.search.structured_format,
+                structured_output=self.config.search.structured_output
             )
         else:
             raise ValueError(f"Unsupported search algorithm: {algorithm_name}")

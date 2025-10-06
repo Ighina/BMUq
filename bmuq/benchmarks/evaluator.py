@@ -20,7 +20,7 @@ class Evaluator:
 
     def evaluate_question(self, question: Dict[str, Any], predicted_path: ReasoningPath,
                          uncertainty_method: UncertaintyMethod,
-                         search_algorithm: SearchAlgorithm) -> Dict[str, Any]:
+                         search_algorithm: SearchAlgorithm, structured_output: bool) -> Dict[str, Any]:
         """
         Evaluate a single question result.
 
@@ -29,12 +29,17 @@ class Evaluator:
             predicted_path: Predicted reasoning path
             uncertainty_method: Uncertainty method used
             search_algorithm: Search algorithm used
+            structured_output: If using the standard Math structured output
 
         Returns:
             Dictionary containing evaluation results
         """
         # Extract predicted answer from reasoning path
-        predicted_answer = self._extract_answer_from_path(predicted_path)
+        if structured_output:
+            # in this structured output case, path and answers were packed in a tuple
+            predicted_path, predicted_answer = predicted_path
+        else:
+            predicted_answer = self._extract_answer_from_path(predicted_path)
 
         # Get and parse ground truth answer
         raw_ground_truth = question.get("answer", "")

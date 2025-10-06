@@ -132,7 +132,7 @@ class OllamaLLM(BaseLLM):
             logger.error(f"Failed to pull model {model_name}: {e}")
             return False
 
-    def generate(self, prompt: str, max_tokens: int = 150, temperature: Optional[float] = None) -> str:
+    def generate(self, prompt: str, max_tokens: int = 150, temperature: Optional[float] = None, structured_output = None) -> str:
         """
         Generate text using Ollama API.
 
@@ -140,6 +140,7 @@ class OllamaLLM(BaseLLM):
             prompt: Input prompt for generation
             max_tokens: Maximum tokens to generate
             temperature: Override default temperature
+            structured_output: A Pydantic class defining the format of the output
 
         Returns:
             Generated text response
@@ -155,11 +156,15 @@ class OllamaLLM(BaseLLM):
                     "stream": False,
                     "options": {
                         "temperature": temp,
-                        "num_predict": max_tokens,
+                        # TODO: implement a proper max_tokens mechanism
+                        # "num_predict": max_tokens,
                         "top_p": 0.9,
                         "stop": []
                     }
                 }
+
+                if structured_output is not None:
+                    payload["format"] = structured_output.model_json_schema()
 
                 # Add system prompt if using chat format
                 if self.system_prompt:
@@ -182,6 +187,9 @@ class OllamaLLM(BaseLLM):
                 # Update usage statistics
                 generation_time = time.time() - start_time
                 self._update_usage_stats(prompt, generated_text, generation_time, result)
+
+                if structured_output is not None and generated_text:
+                    return structured_output.model_validate_json(generated_text)
 
                 return generated_text
 

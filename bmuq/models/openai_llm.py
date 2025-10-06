@@ -38,7 +38,7 @@ class OpenAILLM(BaseLLM):
         wait=wait_exponential(multiplier=1, min=4, max=10),
         retry=retry_if_exception_type((openai.RateLimitError, openai.APITimeoutError))
     )
-    def generate(self, prompt: str, max_tokens: int = 150, temperature: Optional[float] = None) -> str:
+    def generate(self, prompt: str, max_tokens: int = 150, temperature: Optional[float] = None, structured_output = None) -> str:
         """
         Generate text using OpenAI API with retry logic.
 
@@ -53,18 +53,30 @@ class OpenAILLM(BaseLLM):
         try:
             temp = temperature if temperature is not None else self.temperature
 
-            response = self.client.chat.completions.create(
-                model=self.model,
-                messages=[
-                    {"role": "system", "content": "You are a helpful assistant that provides clear, step-by-step mathematical reasoning."},
-                    {"role": "user", "content": prompt}
-                ],
-                max_completion_tokens=max_tokens,
-                temperature=temp,
-                top_p=1.0,
-                frequency_penalty=0.0,
-                presence_penalty=0.0
-            )
+            if structured_output is None:
+                response = self.client.chat.completions.create(
+                    model=self.model,
+                    messages=[
+                        {"role": "system", "content": "You are a helpful assistant that provides clear, step-by-step mathematical reasoning."},
+                        {"role": "user", "content": prompt}
+                    ],
+                    max_completion_tokens=max_tokens,
+                    temperature=temp,
+                    top_p=1.0,
+                    frequency_penalty=0.0,
+                    presence_penalty=0.0
+                )
+            else:
+                response = self.client.responses.parse(
+                    model=self.model,
+                    input=[
+                        {"role": "system", "content": "You are a helpful assistant that provides clear, step-by-step mathematical reasoning."},
+                        {"role": "user", "content": prompt}
+                    ],
+                    temperature=temp,
+                    text_format=structured_output
+                )
+
 
             # Update usage tracking
             if hasattr(response, 'usage') and response.usage:
@@ -77,6 +89,8 @@ class OpenAILLM(BaseLLM):
             self.usage_stats.total_requests += 1
 
             # Extract and return the generated text
+            if structured_output is not None:
+                return response.output_parsed
             content = response.choices[0].message.content.strip()
             return content
 
