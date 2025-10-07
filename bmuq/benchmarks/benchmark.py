@@ -184,7 +184,7 @@ class BMUqBenchmark:
                 ]
 
                 candidates, answers = self.search_algorithm.generate_next_steps(
-                    question["question"], current_beams, beam_width
+                    question["question"], current_beams, beam_width, return_text=True
                 )
 
                 generated_outputs.append({"reasonings": candidates, "answers": answers})
@@ -394,7 +394,9 @@ class BMUqBenchmark:
                         create_outputs=create_outputs,
                     )
 
-                    results["-".join([method] + path_to_attr) + ":" + value] = result
+                    results["-".join([method] + list(path_to_attr)) + ":" + value] = (
+                        result
+                    )
 
                     if create_outputs:
                         # this will apply only for the first method in the list and only if create_outputs is set to True
@@ -405,6 +407,8 @@ class BMUqBenchmark:
                             generated_outputs = json.load(f)
 
                     create_outputs = False  # only create outputs for the first method
+
+                    self.config.experiment_name = original_experiment_name
 
             else:
                 # Update config for this method

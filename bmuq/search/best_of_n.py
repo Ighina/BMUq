@@ -22,7 +22,7 @@ class BestNSearchCoT(BaseSearchAlgorithm):
         uncertainty_method: UncertaintyMethod,
         beam_width: int = 3,
         structured_format: bool = True,
-        structured_output: bool = True
+        structured_output: bool = True,
     ):
         super().__init__(
             "best_of_n_cot",
@@ -30,62 +30,98 @@ class BestNSearchCoT(BaseSearchAlgorithm):
             uncertainty_method,
             max_depth=None,
             structured_format=structured_format,
-            structured_output=structured_output
+            structured_output=structured_output,
         )
         self.beam_width = beam_width
         self.structured_output = structured_output
-        self.diversity_penalty = None # just a placeholder for back compatibility
+        self.diversity_penalty = None  # just a placeholder for back compatibility
 
-    def _find_steps(self, response:str) -> List[str]:
+    def _find_steps(self, response: str) -> List[str]:
         if self.structured_output:
             steps = [res.output for res in response.steps]
         elif response.lower().startswith("step"):
             steps = response.lower().split("step")
         else:
-            steps = self.llm.generate(f"Parse this reasoning chain in a series of steps of the form **Step 1**: <step 1>\n**Step 2**: <step 2>, etc. {response}. JUST OUTPUT THE SERIES OF STEPS AS DESCRIBED.")
+            steps = self.llm.generate(
+                f"Parse this reasoning chain in a series of steps of the form **Step 1**: <step 1>\n**Step 2**: <step 2>, etc. {response}. JUST OUTPUT THE SERIES OF STEPS AS DESCRIBED."
+            )
             steps = steps.split("**:")
         return steps
-    
+
     def _find_answer(self, response: str) -> str:
         if self.structured_output:
             answer = response.final_answer
-        elif len(response.lower().split("final_answer"))>1:
-            answer = response[response.lower().rfind("final_answer"):]
+        elif len(response.lower().split("final_answer")) > 1:
+            answer = response[response.lower().rfind("final_answer") :]
         else:
-            answer = self.llm.generate(f"Find the answer to the problem contained in this reasoning chain {response}. JUST OUTPUT THE GIVEN ANSWER AND NOTHING MORE.")
+            answer = self.llm.generate(
+                f"Find the answer to the problem contained in this reasoning chain {response}. JUST OUTPUT THE GIVEN ANSWER AND NOTHING MORE."
+            )
         return answer
 
-    def generate_next_steps(self, question, paths, num_candidates = 3, max_tokens=512):
+    def generate_next_steps(
+        self, question, paths, num_candidates=3, max_tokens=512, return_text=False
+    ) -> Tuple[List[ReasoningPath], List[str]]:
+        """
+        Generate a set of length n of candidate solutions for the given problem.
+        Args:
+            question: The question to solve.
+            paths: Current reasoning paths (not used in Best of N).
+            num_candidates: Number of candidate solutions to generate.
+            max_tokens: Maximum tokens for LLM response.
+            return_text: Whether to return raw text responses.
+
+        Returns:
+            A tuple of (List of ReasoningPath, List of answers).
+
+        """
         prompt = f"Problem: {question}. Think at the solution step-by-step."
-        
+
+        if return_text:
+            paths = [""] * num_candidates
+
         answers = []
         for i in range(num_candidates):
             try:
                 candidates = []
                 structured_output = MathReasoning if self.structured_output else None
-                response = self.llm.generate(prompt, structured_output=structured_output, max_tokens=max_tokens)
+                response = self.llm.generate(
+                    prompt, structured_output=structured_output, max_tokens=max_tokens
+                )
                 step_content = self._find_steps(response)
                 answer = self._find_answer(response)
 
                 answers.append(answer)
-                
+
                 for idx, step in enumerate(step_content):
-                    step = ReasoningStep(
-                        step_id=idx,
-                        content=step_content[idx],
-                        dependencies=[],
-                        metadata={"generation_attempt": i + 1}
-                    )
+                    if return_text:
+                        step = step_content[idx]
+                    else:
+                        step = ReasoningStep(
+                            step_id=idx,
+                            content=step_content[idx],
+                            dependencies=[],
+                            metadata={"generation_attempt": i + 1},
+                        )
                     candidates.append(step)
-                paths[i].steps = candidates
-                
+
+                if return_text:
+                    paths[i] = candidates
+                else:
+                    paths[i].steps = candidates
+
             except Exception as e:
                 print(f"Error generating step candidate {i+1}: {e}")
                 continue
-        
+
         return paths, answers
 
-    def search(self, question: str, generated_outputs: Optional[str], **kwargs) -> List[ReasoningPath]:
+    def search(
+        self,
+        question: str,
+        generated_outputs: Optional[Dict[str, List[List[str]]]] = None,
+        **kwargs,
+    ) -> List[ReasoningPath]:
         verbose = kwargs.get("verbose", False)
 
         self.search_stats = {
@@ -94,19 +130,26 @@ class BestNSearchCoT(BaseSearchAlgorithm):
             "diversity_penalties_applied": 0,
         }
 
-        current_beams = [ReasoningPath(steps=[], path_id=f"beam_{idx}") for idx in range(self.beam_width)]
+        current_beams = [
+            ReasoningPath(steps=[], path_id=f"beam_{idx}")
+            for idx in range(self.beam_width)
+        ]
 
         if generated_outputs is not None:
             # precomputed outputs, save computation and ensure fair comparison (it works by calling the generate_next_steps outside the logic)
-            completed_paths = generated_outputs["reasonings"]
-            answers = generated_outputs["answers"] 
+            completed_paths = self._convert_text_to_paths(
+                generated_outputs["reasonings"]
+            )
+            answers = generated_outputs["answers"]
         else:
-            completed_paths, answers = self.generate_next_steps(question, current_beams, self.beam_width)
+            completed_paths, answers = self.generate_next_steps(
+                question, current_beams, self.beam_width
+            )
 
         if verbose:
             print(f"Starting Best of N search for: {question}")
             print(f"Number of Candidates: {self.beam_width}")
-        
+
         # # TODO: implement the various uncertainty methods in this different context in which every chain of thought is already genereated as a standalone chain!
 
         if hasattr(self.uncertainty_method, "semantic_entropy"):
@@ -115,7 +158,7 @@ class BestNSearchCoT(BaseSearchAlgorithm):
             # TODO: not clear how to implement semantic entropy in this case... Should I compute the in-chain entropy or doing across different chains such as in CoTa method?
 
             # group_entropies = []
-            
+
             # for group in expanded_groups:
             #     group_entropies.append(
             #         self.uncertainty_method.compute_group_entropy(group)
@@ -170,7 +213,7 @@ class BestNSearchCoT(BaseSearchAlgorithm):
             # current_beams = next_beams[: self.beam_width]
 
         elif hasattr(self.uncertainty_method, "coherence_args"):
-            # This is the relative_coherence method, which compute 
+            # This is the relative_coherence method, which compute
             if self.uncertainty_method.add_topic_score:
                 q = question
             else:
@@ -187,9 +230,7 @@ class BestNSearchCoT(BaseSearchAlgorithm):
                 for idx, candidate in enumerate(path.steps):
                     if not idx:
                         uncertainty_score = UncertaintyScore(
-                            value=0,
-                            method=self.name,
-                            metadata=None
+                            value=0, method=self.name, metadata=None
                         )
                     else:
                         uncertainty_score = self.uncertainty_method.evaluate_step(
@@ -198,12 +239,17 @@ class BestNSearchCoT(BaseSearchAlgorithm):
                     candidate.uncertainty_scores[self.uncertainty_method.name] = (
                         uncertainty_score
                     )
-                path_confidence = self.uncertainty_method.evaluate_path(
-                    question, path
-                )
+                path_confidence = self.uncertainty_method.evaluate_path(question, path)
                 path.total_confidence = path_confidence
 
-        answers = [x for _, x in sorted(zip(completed_paths, answers), key=lambda pair: pair[0].total_confidence, reverse=True)]
+        answers = [
+            x
+            for _, x in sorted(
+                zip(completed_paths, answers),
+                key=lambda pair: pair[0].total_confidence,
+                reverse=True,
+            )
+        ]
         completed_paths.sort(key=lambda p: p.total_confidence, reverse=True)
 
         if verbose:
@@ -277,7 +323,32 @@ class BestNSearchCoT(BaseSearchAlgorithm):
         union = len(words1.union(words2))
 
         return intersection / union if union > 0 else 0.0
-    
+
+    def _convert_text_to_paths(self, texts: List[str]) -> List[ReasoningPath]:
+        """
+        Convert raw text responses into ReasoningPath objects.
+
+        Args:
+            texts: List of raw text responses from LLM
+
+        Returns:
+            List of ReasoningPath objects
+        """
+        paths = []
+        for idx, text in enumerate(texts):
+            steps = [
+                ReasoningStep(
+                    step_id=step_idx,
+                    content=step,
+                    dependencies=[],
+                    metadata={"generation_attempt": idx + 1},
+                )
+                for step_idx, step in enumerate(text)
+            ]
+            path = ReasoningPath(steps=steps, path_id=f"beam_{idx}")
+            paths.append(path)
+        return paths
+
     def get_search_statistics(self) -> Dict[str, Any]:
         """Get beam search statistics."""
         return {
