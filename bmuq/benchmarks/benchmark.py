@@ -176,11 +176,13 @@ class BMUqBenchmark:
             for i in range(num_questions):
                 question = dataset[i]
 
+                beam_width = self.config.search.beam_width
+
                 current_beams = [
                     ReasoningPath(steps=[], path_id=f"beam_{idx}")
-                    for idx in range(self.beam_width)
+                    for idx in range(beam_width)
                 ]
-                beam_width = self.config.search.beam_width
+
                 candidates, answers = self.search_algorithm.generate_next_steps(
                     question["question"], current_beams, beam_width
                 )
