@@ -370,7 +370,7 @@ class BMUqBenchmark:
 
                 for parameter in additional_configuration[method]:
 
-                    path_to_attr = list(parameter.keys())
+                    path_to_attr = list(parameter.keys())[0]
                     value = list(parameter.values())[0]
                     set_nested_attribute(self.config, path_to_attr, value)
                     # Update config for this method
