@@ -547,7 +547,7 @@ class BMUqBenchmark:
             coherence_method = extra_params.get("coherence_method", "arp_pair")
             model_name = extra_params.get("model_name", "all-MiniLM-L6-v2")
             add_topic_score = extra_params.get("add_topic_score", False)
-            question_weight = extra_params.get("question_weight")
+            question_weight = extra_params.get("question_weight", 0.2)
 
             return RelativeCoherenceBasedUQ(
                 model_name=model_name,
