@@ -255,9 +255,6 @@ class BestNSearchCoT(BaseSearchAlgorithm):
         if verbose:
             print(f"Best of N search completed: {len(completed_paths)} paths found")
 
-        if self.structured_output:
-            return completed_paths, answers
-
         return completed_paths, answers
 
     def _score_beams_with_diversity(
