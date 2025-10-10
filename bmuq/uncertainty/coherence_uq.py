@@ -496,7 +496,7 @@ class RelativeCoherenceBasedUQ(UncertaintyMethod):
         elif self.question is not None:
             qe = self.question
         else:
-            return score
+            return 1-score
 
         topic_score = calculate_average_similarity(qe, embeddings)
         control_topic_score = calculate_average_similarity(qe, control_embeddings)
@@ -505,7 +505,7 @@ class RelativeCoherenceBasedUQ(UncertaintyMethod):
         )
         score = self.question_weight * topic_score + self.coherence_weight * score
 
-        return score
+        return 1-score
 
     def evaluate_step(
         self, reasoning_path: List[ReasoningStep], question: Optional[List[np.array]]
