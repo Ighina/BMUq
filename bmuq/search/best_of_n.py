@@ -332,6 +332,8 @@ class BestNSearchCoT(BaseSearchAlgorithm):
             List of ReasoningPath objects
         """
         paths = []
+        if len(texts)==1:
+            texts = self._find_steps(texts[0])
         for idx, text in enumerate(texts):
             steps = [
                 ReasoningStep(
