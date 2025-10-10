@@ -505,7 +505,7 @@ class RelativeCoherenceBasedUQ(UncertaintyMethod):
         )
         score = self.question_weight * topic_score + self.coherence_weight * score
 
-        return score
+        return 1-score
 
     def evaluate_step(
         self, reasoning_path: List[ReasoningStep], question: Optional[List[np.array]]

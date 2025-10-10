@@ -44,7 +44,8 @@ class BestNSearchCoT(BaseSearchAlgorithm):
         elif response.lower().startswith("**step"):
             steps = response.lower().split("**step")
         else:
-            steps = self.llm.generate(f"Parse this reasoning chain in a series of steps of the form **Step 1**: <step 1>\n**Step 2**: <step 2>, etc. {response}. JUST OUTPUT THE SERIES OF STEPS AS DESCRIBED.")
+            steps = self.llm.generate(f"Parse this reasoning chain in a series of steps of the form **Step 1**: <step 1>\n**Step 2**: <step 2>, etc. {response}. JUST OUTPUT THE SERIES OF STEPS AS DESCRIBED.",
+                                      temperature=0.0)
             steps = steps.lower().split("**step")
         return steps
 
