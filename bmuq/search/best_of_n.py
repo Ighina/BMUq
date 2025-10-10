@@ -41,9 +41,11 @@ class BestNSearchCoT(BaseSearchAlgorithm):
             steps = [res.output for res in response.steps]
         elif response.lower().startswith("step"):
             steps = response.lower().split("step")
+        elif response.lower().startswith("**step"):
+            steps = response.lower().split("**step")
         else:
             steps = self.llm.generate(f"Parse this reasoning chain in a series of steps of the form **Step 1**: <step 1>\n**Step 2**: <step 2>, etc. {response}. JUST OUTPUT THE SERIES OF STEPS AS DESCRIBED.")
-            steps = steps.split("**:")
+            steps = steps.lower().split("**step")
         return steps
     
     def _find_answer(self, response: str) -> str:
