@@ -210,7 +210,7 @@ class CoherenceBasedUQ(UncertaintyMethod):
                 confidences.append(score.value)
 
         # Return average confidence across all steps
-        return sum(confidences) / len(confidences)
+        return 1 - (sum(confidences) / len(confidences))
 
     def batch_evaluate_steps(
         self,
@@ -496,7 +496,7 @@ class RelativeCoherenceBasedUQ(UncertaintyMethod):
         elif self.question is not None:
             qe = self.question
         else:
-            return 1-score
+            return 1 - score
 
         topic_score = calculate_average_similarity(qe, embeddings)
         control_topic_score = calculate_average_similarity(qe, control_embeddings)
@@ -505,7 +505,7 @@ class RelativeCoherenceBasedUQ(UncertaintyMethod):
         )
         score = self.question_weight * topic_score + self.coherence_weight * score
 
-        return 1-score
+        return 1 - score
 
     def evaluate_step(
         self, reasoning_path: List[ReasoningStep], question: Optional[List[np.array]]
