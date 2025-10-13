@@ -43,6 +43,9 @@ class UncertaintyConfig:
     method: str = (
         "selfcheck"  # selfcheck, entropy_based, consistency_based, random_baseline
     )
+    answer_weight: bool = (
+        False  # Weight uncertainty by answer identity (majority voting)
+    )
 
     # SelfCheck specific settings
     lambda_neg1: float = 1.0
@@ -171,7 +174,7 @@ class BMUqConfig:
             "random_baseline",
             "semantic_entropy",
             "coherence_based",
-            "relative_coherence_based"
+            "relative_coherence_based",
         ]
         if self.uncertainty.method not in valid_uncertainty_methods:
             issues.append(

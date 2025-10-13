@@ -23,6 +23,7 @@ from ..uncertainty.uq_methods import (
     EntailmentChecker,
 )
 from ..uncertainty.coherence_uq import CoherenceBasedUQ, RelativeCoherenceBasedUQ
+from ..uncertainty.adapters import add_weighted_aggregation
 from ..search.tree_search import TreeSearchCoT
 from ..search.beam_search import BeamSearchCoT
 from ..search.best_of_n import BestNSearchCoT
@@ -224,6 +225,13 @@ class BMUqBenchmark:
 
                 # Select best path
                 best_path = paths[0] if paths else None
+
+                try:
+                    name = self.uncertainty_method.name
+                except AttributeError:
+                    self.uncertainty_method.name = (
+                        self.uncertainty_method.base_method.name
+                    )
 
                 if best_path:
                     # Evaluate the path
@@ -510,23 +518,23 @@ class BMUqBenchmark:
         method_name = self.config.uncertainty.method
 
         if method_name == "selfcheck":
-            return SelfCheck(
+            uncertainty = SelfCheck(
                 self.llm,
                 lambda_neg1=self.config.uncertainty.lambda_neg1,
                 lambda_0=self.config.uncertainty.lambda_0,
             )
         elif method_name == "entropy_based":
-            return EntropyBasedUQ(
+            uncertainty = EntropyBasedUQ(
                 self.llm,
                 num_samples=self.config.uncertainty.num_samples,
                 temperature=self.config.uncertainty.sampling_temperature,
             )
         elif method_name == "consistency_based":
-            return ConsistencyBasedUQ(self.llm)
+            uncertainty = ConsistencyBasedUQ(self.llm)
         elif method_name == "random_baseline":
-            return RandomBaselineUQ(seed=self.config.random_seed)
+            uncertainty = RandomBaselineUQ(seed=self.config.random_seed)
         elif method_name == "semantic_entropy":
-            return SemanticEntropyBasedUQ(
+            uncertainty = SemanticEntropyBasedUQ(
                 semantic_entropy=SemanticEntropy(
                     entailment_checker=EntailmentChecker.from_pretrained(
                         self.config.uncertainty.entailment_model
@@ -545,7 +553,7 @@ class BMUqBenchmark:
             model_name = extra_params.get("model_name", "all-MiniLM-L6-v2")
             decay = extra_params.get("decay", 0.9)
 
-            return CoherenceBasedUQ(
+            uncertainty = CoherenceBasedUQ(
                 model_name=model_name, coherence_method=coherence_method, decay=decay
             )
         elif method_name == "relative_coherence_based":
@@ -555,7 +563,7 @@ class BMUqBenchmark:
             add_topic_score = extra_params.get("add_topic_score", False)
             question_weight = extra_params.get("question_weight", 0.2)
 
-            return RelativeCoherenceBasedUQ(
+            uncertainty = RelativeCoherenceBasedUQ(
                 model_name=model_name,
                 coherence_method=coherence_method,
                 add_topic_score=add_topic_score,
@@ -564,6 +572,10 @@ class BMUqBenchmark:
 
         else:
             raise ValueError(f"Unsupported uncertainty method: {method_name}")
+
+        if self.config.uncertainty.answer_weight:
+            uncertainty = add_weighted_aggregation(uncertainty, problem_type="math")
+        return uncertainty
 
     def _create_search_algorithm(self):
         """Create search algorithm based on configuration."""

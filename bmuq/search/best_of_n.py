@@ -44,8 +44,10 @@ class BestNSearchCoT(BaseSearchAlgorithm):
         elif response.lower().startswith("**step"):
             steps = response.lower().split("**step")
         else:
-            steps = self.llm.generate(f"Parse this reasoning chain in a series of steps of the form **Step 1**: <step 1>\n**Step 2**: <step 2>, etc. {response}. JUST OUTPUT THE SERIES OF STEPS AS DESCRIBED.",
-                                      temperature=0.0)
+            steps = self.llm.generate(
+                f"Parse this reasoning chain in a series of steps of the form **Step 1**: <step 1>\n**Step 2**: <step 2>, etc. {response}. JUST OUTPUT THE SERIES OF STEPS AS DESCRIBED.",
+                temperature=0.0,
+            )
             steps = steps.lower().split("**step")
         return steps
 
@@ -151,6 +153,13 @@ class BestNSearchCoT(BaseSearchAlgorithm):
             print(f"Starting Best of N search for: {question}")
             print(f"Number of Candidates: {self.beam_width}")
 
+        weight_answer = False
+        if hasattr(self.uncertainty_method, "base_method"):
+            # Decouple the answer aggregator method from the base uncertainty method
+            weight_answer = True
+            self.weighted_method = self.uncertainty_method.weighted_method.aggregator
+            self.uncertainty_method = self.uncertainty_method.base_method
+
         # # TODO: implement the various uncertainty methods in this different context in which every chain of thought is already genereated as a standalone chain!
 
         if hasattr(self.uncertainty_method, "semantic_entropy"):
@@ -243,20 +252,61 @@ class BestNSearchCoT(BaseSearchAlgorithm):
                 path_confidence = self.uncertainty_method.evaluate_path(question, path)
                 path.total_confidence = path_confidence
 
-        answers = [
-            x
-            for _, x in sorted(
-                zip(completed_paths, answers),
-                key=lambda pair: pair[0].total_confidence,
-                reverse=True,
+        if weight_answer:
+            aggregated_paths = self.weighted_method.aggregate_answers(
+                completed_paths, self.uncertainty_method.name
             )
-        ]
-        completed_paths.sort(key=lambda p: p.total_confidence, reverse=True)
+            # just use the path with the highest individual score in the group
+            new_paths = []
+            new_answers = []
+            for group in aggregated_paths:
+                new_answers.append(group.answer)  # take the answer of the best path
+                best_path = group.paths[np.argmax(group.individual_confidences)]
+                new_paths.append(best_path)
+            completed_paths = new_paths
+            answers = new_answers
+        else:
+            answers = [
+                x
+                for _, x in sorted(
+                    zip(completed_paths, answers),
+                    key=lambda pair: pair[0].total_confidence,
+                    reverse=True,
+                )
+            ]
+            completed_paths.sort(key=lambda p: p.total_confidence, reverse=True)
 
         if verbose:
             print(f"Best of N search completed: {len(completed_paths)} paths found")
 
         return completed_paths, answers
+
+    # TODO: the rescoring method is ad hoc for best of n, but there is a general version using adapters module: change this
+    def _rescore_with_answer(
+        self, paths: List[ReasoningPath], answers: List[str]
+    ) -> List[ReasoningPath]:
+        """
+        Rescore paths based on the provided answers.
+
+        Args:
+            paths: List of reasoning paths to rescore
+            answers: Corresponding list of answers
+
+        Returns:
+            List of ReasoningPath objects with updated scores
+        """
+        rescored_paths = copy.deepcopy(paths)
+
+        for path, answer in zip(rescored_paths, answers):
+            # Simple heuristic: increase score if answer is found in the last step content
+            if path.steps and answer.lower() in path.steps[-1].content.lower():
+                path.total_confidence += 1.0  # Boost score
+            else:
+                path.total_confidence -= 1.0  # Penalize score
+
+        # Sort paths by updated score descending
+        rescored_paths.sort(key=lambda p: p.total_confidence, reverse=True)
+        return rescored_paths
 
     def _score_beams_with_diversity(
         self, beams: List[ReasoningPath]
@@ -333,9 +383,9 @@ class BestNSearchCoT(BaseSearchAlgorithm):
             List of ReasoningPath objects
         """
         paths = []
-        
+
         for idx, text in enumerate(texts):
-            if len(text)==1:
+            if len(text) == 1:
                 text = self._find_steps(text[0])
             steps = [
                 ReasoningStep(
