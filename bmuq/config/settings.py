@@ -172,6 +172,7 @@ class BMUqConfig:
             "entropy_based",
             "consistency_based",
             "random_baseline",
+            "majority_vote",
             "semantic_entropy",
             "coherence_based",
             "relative_coherence_based",

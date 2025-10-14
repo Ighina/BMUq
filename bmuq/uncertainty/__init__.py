@@ -3,9 +3,19 @@ Uncertainty quantification methods for reasoning chains.
 """
 
 from .selfcheck import SelfCheck
-from .base_methods import EntropyBasedUQ, ConsistencyBasedUQ, RandomBaselineUQ
+from .base_methods import (
+    EntropyBasedUQ,
+    ConsistencyBasedUQ,
+    RandomBaselineUQ,
+    MajorityVoteUQ,
+)
 from .uq_methods import SemanticEntropyBasedUQ, SequentialConsistencyBasedUQ
-from .coherence_uq import CoherenceBasedUQ, create_coherence_uq, RelativeCoherenceBasedUQ, create_relative_coherence_uq
+from .coherence_uq import (
+    CoherenceBasedUQ,
+    create_coherence_uq,
+    RelativeCoherenceBasedUQ,
+    create_relative_coherence_uq,
+)
 from .weighted_aggregation import (
     WeightedAnswerAggregator,
     WeightedUncertaintyMethod,
@@ -13,7 +23,7 @@ from .weighted_aggregation import (
     GenericAnswerExtractor,
     AnswerCandidate,
     create_math_weighted_method,
-    create_generic_weighted_method
+    create_generic_weighted_method,
 )
 from .adapters import (
     WeightedAnswerAdapter,
@@ -21,7 +31,7 @@ from .adapters import (
     BulkEvaluator,
     create_coherence_with_aggregation,
     create_relative_coherence_with_aggregation,
-    create_random_with_aggregation
+    create_random_with_aggregation,
 )
 
 __all__ = [
@@ -29,6 +39,7 @@ __all__ = [
     "EntropyBasedUQ",
     "ConsistencyBasedUQ",
     "RandomBaselineUQ",
+    "MajorityVoteUQ",
     "SemanticEntropyBasedUQ",
     "SequentialConsistencyBasedUQ",
     "CoherenceBasedUQ",
@@ -49,5 +60,5 @@ __all__ = [
     "BulkEvaluator",
     "create_coherence_with_aggregation",
     "create_relative_coherence_with_aggregation",
-    "create_random_with_aggregation"
+    "create_random_with_aggregation",
 ]
