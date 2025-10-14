@@ -535,7 +535,7 @@ class BMUqBenchmark:
         elif method_name == "random_baseline":
             uncertainty = RandomBaselineUQ(seed=self.config.random_seed)
         elif method_name == "majority_vote":
-            uncertainty = MajorityVoteUQ()
+            return MajorityVoteUQ()
         elif method_name == "semantic_entropy":
             uncertainty = SemanticEntropyBasedUQ(
                 semantic_entropy=SemanticEntropy(
