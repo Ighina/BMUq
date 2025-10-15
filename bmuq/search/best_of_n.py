@@ -153,16 +153,26 @@ class BestNSearchCoT(BaseSearchAlgorithm):
             print(f"Starting Best of N search for: {question}")
             print(f"Number of Candidates: {self.beam_width}")
 
-        weight_answer = False
+        # TODO: delete weight answer if it works
         if hasattr(self.uncertainty_method, "base_method"):
             # Decouple the answer aggregator method from the base uncertainty method
-            weight_answer = True
-            self.weighted_method = self.uncertainty_method.weighted_method.aggregator
-            self.uncertainty_method = self.uncertainty_method.base_method
+            aggregated_paths = self.uncertainty_method.evaluate_paths_with_aggregation(
+                question, completed_paths
+            )
+
+            new_paths = []
+            new_answers = []
+            for group in aggregated_paths:
+                new_answers.append(group.answer)  # take the answer of the best path
+                best_path = group.paths[np.argmax(group.individual_confidences)]
+                new_paths.append(best_path)
+            completed_paths = new_paths
+            answers = new_answers
+            return completed_paths, answers
 
         # # TODO: implement the various uncertainty methods in this different context in which every chain of thought is already genereated as a standalone chain!
 
-        if hasattr(self.uncertainty_method, "semantic_entropy"):
+        elif hasattr(self.uncertainty_method, "semantic_entropy"):
             raise NotImplementedError()
 
             # TODO: not clear how to implement semantic entropy in this case... Should I compute the in-chain entropy or doing across different chains such as in CoTa method?
@@ -252,29 +262,15 @@ class BestNSearchCoT(BaseSearchAlgorithm):
                 path_confidence = self.uncertainty_method.evaluate_path(question, path)
                 path.total_confidence = path_confidence
 
-        if weight_answer:
-            aggregated_paths = self.weighted_method.aggregate_answers(
-                completed_paths, self.uncertainty_method.name
+        answers = [
+            x
+            for _, x in sorted(
+                zip(completed_paths, answers),
+                key=lambda pair: pair[0].total_confidence,
+                reverse=True,
             )
-            # just use the path with the highest individual score in the group
-            new_paths = []
-            new_answers = []
-            for group in aggregated_paths:
-                new_answers.append(group.answer)  # take the answer of the best path
-                best_path = group.paths[np.argmax(group.individual_confidences)]
-                new_paths.append(best_path)
-            completed_paths = new_paths
-            answers = new_answers
-        else:
-            answers = [
-                x
-                for _, x in sorted(
-                    zip(completed_paths, answers),
-                    key=lambda pair: pair[0].total_confidence,
-                    reverse=True,
-                )
-            ]
-            completed_paths.sort(key=lambda p: p.total_confidence, reverse=True)
+        ]
+        completed_paths.sort(key=lambda p: p.total_confidence, reverse=True)
 
         if verbose:
             print(f"Best of N search completed: {len(completed_paths)} paths found")
