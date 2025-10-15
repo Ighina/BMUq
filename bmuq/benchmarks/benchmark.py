@@ -380,13 +380,20 @@ class BMUqBenchmark:
             if method in additional_configuration:
 
                 for parameter in additional_configuration[method]:
+                    parms = []
+                    for idx in range(len(parameter)):
+                        path_to_attr = list(parameter.keys())[idx]
+                        value = list(parameter.values())[idx]
+                        parms.append("_".join(path_to_attr) + ":" + str(value))
+                        set_nested_attribute(self.config, path_to_attr, value)
 
-                    path_to_attr = list(parameter.keys())[0]
-                    value = list(parameter.values())[0]
-                    set_nested_attribute(self.config, path_to_attr, value)
+                    parms = "-".join(parms)
+
                     # Update config for this method
                     self.config.uncertainty.method = method
-                    self.config.experiment_name = f"{self.config.experiment_name}_{method}_{".".join(path_to_attr)}:{value}"
+                    self.config.experiment_name = (
+                        f"{self.config.experiment_name}_{method}_{parms}"
+                    )
 
                     # Recreate uncertainty method
                     self.uncertainty_method = self._create_uncertainty_method()
@@ -403,9 +410,7 @@ class BMUqBenchmark:
                         create_outputs=create_outputs,
                     )
 
-                    results["-".join([method] + list(path_to_attr)) + ":" + value] = (
-                        result
-                    )
+                    results[method + "_" + parms] = result
 
                     if create_outputs:
                         # this will apply only for the first method in the list and only if create_outputs is set to True
@@ -555,9 +560,15 @@ class BMUqBenchmark:
             )
             model_name = extra_params.get("model_name", "all-MiniLM-L6-v2")
             decay = extra_params.get("decay", 0.9)
+            add_topic_score = extra_params.get("add_topic_score", False)
+            question_weight = extra_params.get("question_weight", 0.2)
 
             uncertainty = CoherenceBasedUQ(
-                model_name=model_name, coherence_method=coherence_method, decay=decay
+                model_name=model_name,
+                coherence_method=coherence_method,
+                decay=decay,
+                add_topic_score=add_topic_score,
+                question_weight=question_weight,
             )
         elif method_name == "relative_coherence_based":
             extra_params = self.config.uncertainty.extra_params

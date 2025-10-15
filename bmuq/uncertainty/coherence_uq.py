@@ -6,7 +6,7 @@ between reasoning steps using sentence embeddings and cosine similarity.
 """
 
 from datasets import load_dataset
-from typing import List, Optional, Dict, Any
+from typing import List, Optional, Dict, Any, Union
 import numpy as np
 from sentence_transformers import SentenceTransformer, util
 
@@ -32,6 +32,8 @@ class CoherenceBasedUQ(UncertaintyMethod):
         model_name: str = "all-MiniLM-L6-v2",
         coherence_method: str = "mean_cosine_similarity",
         decay: float = 0.9,
+        add_topic_score: bool = False,
+        question_weight: Union[float, str] = 0.2,
     ):
         """
         Initialize coherence-based uncertainty quantification.
@@ -44,11 +46,24 @@ class CoherenceBasedUQ(UncertaintyMethod):
                 - "weighted_cosine_similarity": Weighted average with recency decay
                 - "cluster_centroid": Similarity with centroid of previous embeddings
             decay: Decay factor for weighted similarity (0 < decay <= 1)
+            add_topic_score: if using the coherence with the question as well as an additional signal
+            question_weight: if the "topicality" score is included (i.e. if question is included), the weight to assign to this score.
+                             if question_weight is set to "all", then only the topicality score is used
         """
         super().__init__("coherence_based")
         self.model = SentenceTransformer(model_name)
         self.coherence_method = coherence_method
         self.decay = decay
+        self.add_topic_score = add_topic_score
+        if question_weight == "all" or question_weight == 1.0:
+            self.question_weight = 1.0
+            self.coherence_weight = 0.0
+        else:
+            self.question_weight = question_weight
+            if question_weight is not None:
+                self.coherence_weight = 1 - question_weight
+            else:
+                self.coherence_weight = 1.0
 
         # Validate coherence method
         valid_methods = {
@@ -144,9 +159,23 @@ class CoherenceBasedUQ(UncertaintyMethod):
             current_text = step_to_evaluate.content
 
             # Compute coherence score
-            coherence_score = self._compute_coherence_score(
-                current_text, previous_texts
-            )
+            if self.coherence_weight > 0:
+                coherence_score = self._compute_coherence_score(
+                    current_text, previous_texts
+                )
+                if self.add_topic_score and question:
+
+                    topic_score = self._compute_coherence_score(
+                        current_text, [question]
+                    )
+                    coherence_score = (
+                        self.coherence_weight * coherence_score
+                        + self.question_weight * topic_score
+                    )
+            else:
+                coherence_score = self._compute_coherence_score(
+                    current_text, [question]
+                )
 
             # Coherence score is directly used as confidence
             # High coherence = high confidence = low uncertainty
