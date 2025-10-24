@@ -188,6 +188,7 @@ class PRMTrainingConfig:
     logging_steps: int = 100
     eval_steps: int = 500
     save_steps: int = 500
+    save_total_limit: int = 5
     max_length: int = 512
     seed: int = 42
     fp16: bool = False
