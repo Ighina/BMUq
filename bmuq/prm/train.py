@@ -316,10 +316,15 @@ class PRMDataset(Dataset):
             features["labels"] = torch.tensor(label, dtype=torch.long)
         else:  # embeddings
             embeddings = self.featurizer(text)
+
+            # CRITICAL: Ensure embeddings are always 2D [seq_len, embedding_dim]
+            if embeddings.dim() == 1:
+                embeddings = embeddings.unsqueeze(0)  # Add sequence dimension
+            elif embeddings.dim() == 3:
+                embeddings = embeddings.squeeze(0)  # Remove batch dimension
+
             features = {
-                "inputs_embeds": (
-                    embeddings.squeeze(0) if embeddings.dim() > 1 else embeddings
-                ),
+                "inputs_embeds": (embeddings),
                 "labels": torch.tensor(label, dtype=torch.long),
             }
 
