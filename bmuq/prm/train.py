@@ -122,7 +122,13 @@ class PRMCollator:
         embeddings_list = [item["inputs_embeds"] for item in batch]
         labels_list = [item["labels"] for item in batch]
 
-        # Get max sequence length in batch
+        # Truncate sequences that are too long
+        max_allowed_seq_len = 512
+        embeddings_list = [
+            emb[:max_allowed_seq_len] if emb.shape[0] > max_allowed_seq_len else emb
+            for emb in embeddings_list
+        ]
+
         max_seq_len = max(emb.shape[0] for emb in embeddings_list)
         batch_size = len(embeddings_list)
 
