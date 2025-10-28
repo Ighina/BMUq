@@ -16,7 +16,7 @@ from .coherence_uq import (
     RelativeCoherenceBasedUQ,
     create_relative_coherence_uq,
 )
-from .prm_based_uq import PRMBasedUQ
+from .prmbased_uq import PRMBasedUQ
 from .weighted_aggregation import (
     WeightedAnswerAggregator,
     WeightedUncertaintyMethod,

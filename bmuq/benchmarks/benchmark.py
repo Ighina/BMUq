@@ -593,12 +593,12 @@ class BMUqBenchmark:
             featurizer_model = extra_params.get(
                 "featurizer_model", "sentence-transformers/all-mpnet-base-v2"
             )
-            threshold = extra_params.get("threshold", 0.5)
+            scoring_method = extra_params.get("scoring_method", "validity")
 
             uncertainty = PRMBasedUQ(
                 pretrained_model_path=pretrained_model,
                 featurizer_model=featurizer_model,
-                threshold=threshold,
+                scoring_method=scoring_method,
             )
 
         else:
