@@ -596,7 +596,7 @@ class BMUqBenchmark:
             threshold = extra_params.get("threshold", 0.5)
 
             uncertainty = PRMBasedUQ(
-                pretrained_model=pretrained_model,
+                pretrained_model_path=pretrained_model,
                 featurizer_model=featurizer_model,
                 threshold=threshold,
             )
