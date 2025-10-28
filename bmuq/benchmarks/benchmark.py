@@ -11,6 +11,7 @@ from typing import List, Dict, Optional, Any, Union, Tuple
 
 from ..config.settings import BMUqConfig
 from ..models.base import BaseLLM
+from ..uncertainty.prmbased_uq import PRMBasedUQ
 from ..uncertainty.selfcheck import SelfCheck
 from ..uncertainty.base_methods import (
     EntropyBasedUQ,
@@ -582,6 +583,22 @@ class BMUqBenchmark:
                 coherence_method=coherence_method,
                 add_topic_score=add_topic_score,
                 question_weight=question_weight,
+            )
+
+        elif method_name == "prm_based":
+            extra_params = self.config.uncertainty.extra_params
+            pretrained_model = extra_params.get(
+                "pretrained_model", "bmuq/prm-bert-token-classification"
+            )
+            featurizer_model = extra_params.get(
+                "featurizer_model", "sentence-transformers/all-mpnet-base-v2"
+            )
+            threshold = extra_params.get("threshold", 0.5)
+
+            uncertainty = PRMBasedUQ(
+                pretrained_model=pretrained_model,
+                featurizer_model=featurizer_model,
+                threshold=threshold,
             )
 
         else:

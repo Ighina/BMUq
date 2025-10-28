@@ -22,9 +22,18 @@ except ImportError:
     _HUGGINGFACE_AVAILABLE = False
     HuggingFaceLLM = None
 
+# Conditionally import PRM module if available
+try:
+    from .prm import PRMFeaturizer, PRMTrainer
+    _PRM_AVAILABLE = True
+except ImportError:
+    _PRM_AVAILABLE = False
+    PRMFeaturizer = None
+    PRMTrainer = None
+
 __all__ = [
     "ReasoningStep",
-    "ReasoningPath", 
+    "ReasoningPath",
     "SelfCheck",
     "TreeSearchCoT",
     "BaseLLM",
@@ -33,3 +42,6 @@ __all__ = [
 
 if _HUGGINGFACE_AVAILABLE:
     __all__.append("HuggingFaceLLM")
+
+if _PRM_AVAILABLE:
+    __all__.extend(["PRMFeaturizer", "PRMTrainer"])
