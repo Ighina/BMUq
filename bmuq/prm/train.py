@@ -6,7 +6,7 @@ using the PRM800K dataset or custom datasets. Supports both pre-trained and rand
 initialized models with token-based or embedding-based inputs.
 """
 
-from typing import Optional, Dict, Any, Literal, List
+from typing import Optional, Dict, Any, Literal, List, Union
 import os
 from dataclasses import dataclass
 
@@ -22,7 +22,9 @@ from transformers import (
     EvalPrediction,
     PreTrainedModel,
     BertConfig,
+    ModernBertConfig,
     BertModel,
+    ModernBertModel,
 )
 from datasets import load_dataset, Dataset as HFDataset
 import numpy as np
@@ -81,24 +83,24 @@ class PRMCollator:
         Pads input_ids with pad_token_id and labels with -100.
         """
         # Extract sequences
-        input_ids_list = [item["input_ids"] for item in batch]
-        labels_list = [item["labels"] for item in batch]
+        input_ids_list = torch.concatenate([item["input_ids"] for item in batch])
+        labels_list = torch.concatenate([item["labels"] for item in batch])
 
         # Pad input_ids with pad_token_id
-        input_ids_padded = pad_sequence(
-            input_ids_list, batch_first=True, padding_value=self.pad_token_id
-        )
+        # input_ids_padded = pad_sequence(
+        #     input_ids_list, batch_first=True, padding_value=self.pad_token_id
+        # )
 
-        # Create attention mask (1 for real tokens, 0 for padding)
-        attention_mask = (input_ids_padded != self.pad_token_id).long()
+        # # Create attention mask (1 for real tokens, 0 for padding)
+        attention_mask = (input_ids_list != self.pad_token_id).long()
 
-        # Stack labels (they're already single values, not sequences)
-        labels_stacked = pad_sequence(labels_list, batch_first=True, padding_value=-100)
+        # # Stack labels (they're already single values, not sequences)
+        # labels_stacked = pad_sequence(labels_list, batch_first=True, padding_value=-100)
 
         result = {
-            "input_ids": input_ids_padded,
+            "input_ids": input_ids_list,
             "attention_mask": attention_mask,
-            "labels": labels_stacked,
+            "labels": labels_list,
         }
 
         # Include token_type_ids if present
@@ -210,13 +212,18 @@ class BertForTokenClassificationWithEmbeddings(nn.Module):
     and skips the embedding layer of BERT.
     """
 
-    def __init__(self, config: BertConfig, num_labels: int = 3):
+    def __init__(
+        self, config: Union[BertConfig, ModernBertConfig], num_labels: int = 3
+    ):
         super().__init__()
         self.num_labels = num_labels
         self.config = config
 
         # Initialize BERT encoder without embeddings
-        self.bert = BertModel(config, add_pooling_layer=False)
+        if isinstance(config, ModernBertConfig):
+            self.bert = ModernBertModel(config, add_pooling_layer=False)
+        else:
+            self.bert = BertModel(config, add_pooling_layer=False)
 
         # Classification head
         self.dropout = nn.Dropout(config.hidden_dropout_prob)
@@ -409,15 +416,27 @@ class PRMTrainer:
         else:  # embeddings
             # For embeddings, we need a custom model that accepts inputs_embeds
             if self.config.use_pretrained:
-                config = BertConfig.from_pretrained(self.config.model_name_or_path)
+                if isinstance(
+                    AutoConfig.from_pretrained(self.config.model_name_or_path),
+                    ModernBertConfig,
+                ):
+                    config = ModernBertConfig.from_pretrained(
+                        self.config.model_name_or_path,
+                        num_labels=self.config.num_labels,
+                    )
+                else:
+                    config = BertConfig.from_pretrained(self.config.model_name_or_path)
             else:
-                config = BertConfig(
-                    vocab_size=30522,  # Default BERT vocab size
-                    hidden_size=768,
-                    num_hidden_layers=12,
-                    num_attention_heads=12,
-                    intermediate_size=3072,
-                )
+                if self.config.model_name_or_path.startswith("modern-bert"):
+                    config = ModernBertConfig()  # Use default config for ModernBert
+                else:
+                    config = BertConfig(
+                        vocab_size=30522,  # Default BERT vocab size
+                        hidden_size=768,
+                        num_hidden_layers=12,
+                        num_attention_heads=12,
+                        intermediate_size=3072,
+                    )
 
             # Set hidden_size to match embedding dimension if available
             embedding_dim = self.featurizer.get_embedding_dim()

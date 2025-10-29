@@ -62,6 +62,58 @@ class InferenceBertForTokenClassificationWithEmbeddings(nn.Module):
         return probs
 
 
+class UnsupervisedCoherencePRM(nn.Module):
+    """
+    BERT model for token-level classification that accepts pre-computed embeddings.
+
+    This model is designed to work with sentence embeddings from sentence-transformers
+    and skips the embedding layer of BERT.
+    """
+
+    def __init__(self, pretrained_model: str, featurizer_model: str):
+        super().__init__()
+        config = BertConfig.from_pretrained(pretrained_model)
+        state_dict = safe_load_file(
+            f"{pretrained_model}/model.safetensors", device="cpu"
+        )
+        self.model = BertForTokenClassificationWithEmbeddings(config)
+
+        self.model.load_state_dict(state_dict, strict=False)
+
+        self.featiurizer = PRMFeaturizer(
+            featurizer_type="embeddings", model_name_or_path=featurizer_model
+        )
+
+    def forward(
+        self,
+        inputs_text: List[str],
+    ) -> List[List[float]]:
+        """
+        Forward pass using pre-computed embeddings.
+
+        Args:
+            inputs_text: The steps to analyze: in inference accepts only 2-D lists (i.e. one
+            reasoning chain at the time)
+
+        Returns:
+            Dictionary containing loss (if labels provided) and logits
+        """
+        with torch.no_grad():
+            inputs_embeds = self.featiurizer(inputs_text)
+
+            if inputs_embeds.dim() == 2:
+                inputs_embeds = inputs_embeds.unsqueeze(0)
+
+            # Pass through BERT encoder
+            logits = self.model(
+                inputs_embeds=inputs_embeds,
+            )["logits"]
+
+            probs = torch.softmax(logits, dim=-1).detach().cpu().tolist()
+
+        return probs
+
+
 if __name__ == "__main__":
     pretrained_model = sys.argv[1]
     featurizer_model = sys.argv[2]
