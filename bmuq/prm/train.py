@@ -431,7 +431,9 @@ class PRMTrainer:
                     config = BertConfig.from_pretrained(self.config.model_name_or_path)
             else:
                 if self.config.model_name_or_path.startswith("modern-bert"):
-                    config = ModernBertConfig()  # Use default config for ModernBert
+                    config = ModernBertConfig(
+                        reference_compile=False
+                    )  # Use default config for ModernBert
                 else:
                     config = BertConfig(
                         vocab_size=30522,  # Default BERT vocab size
