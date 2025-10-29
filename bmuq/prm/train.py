@@ -221,12 +221,15 @@ class BertForTokenClassificationWithEmbeddings(nn.Module):
 
         # Initialize BERT encoder without embeddings
         if isinstance(config, ModernBertConfig):
-            self.bert = ModernBertModel(config, add_pooling_layer=False)
+            self.bert = ModernBertModel(config)
         else:
             self.bert = BertModel(config, add_pooling_layer=False)
 
         # Classification head
-        self.dropout = nn.Dropout(config.hidden_dropout_prob)
+        try:
+            self.dropout = nn.Dropout(config.hidden_dropout_prob)
+        except AttributeError:
+            self.dropout = nn.Dropout(0.1)
         self.classifier = nn.Linear(config.hidden_size, num_labels)
 
         # Initialize weights
