@@ -60,12 +60,18 @@ setup(
             "torch>=1.12.0",
             "accelerate>=0.20.0",
         ],
+        "vllm": [
+            "vllm>=0.2.0",
+            "transformers>=4.20.0",
+            "torch>=1.12.0",
+        ],
         "all": [
             "anthropic>=0.3.0",
             "transformers>=4.20.0",
             "torch>=1.12.0",
-            "accelerate>=0.20.0",
+            "accelerate>=0.26.0",
             "bitsandbytes>=0.39.0",
+            "vllm>=0.2.0",
         ],
     },
 )
