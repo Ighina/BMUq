@@ -419,6 +419,43 @@ class OllamaLLM(BaseLLM):
         except requests.exceptions.RequestException as e:
             yield f"Error: Streaming failed: {e}"
 
+    def generate_with_log_probs(self, prompt: str, max_tokens: int = 150,
+                                 temperature: Optional[float] = None) -> Dict[str, Any]:
+        """
+        Generate text and return log probabilities for each token.
+
+        Note: Ollama doesn't natively support log probability extraction through its API.
+        This method returns the generated text with empty log probability arrays.
+
+        Args:
+            prompt: Input prompt for generation
+            max_tokens: Maximum tokens to generate
+            temperature: Override default temperature
+
+        Returns:
+            Dictionary containing:
+                - 'text': Generated text
+                - 'log_probs': Empty list (not supported by Ollama)
+                - 'tokens': Empty list (not supported by Ollama)
+                - 'top_log_probs': Empty list (not supported by Ollama)
+        """
+        # Ollama API doesn't expose log probabilities
+        # Fall back to regular generation
+        text = self.generate(prompt, max_tokens, temperature)
+
+        logger.warning(
+            "Ollama models do not support log probability extraction. "
+            "Returning empty log_probs arrays. Consider using HuggingFace or OpenAI models "
+            "for token probability-based uncertainty quantification."
+        )
+
+        return {
+            'text': text,
+            'log_probs': [],
+            'tokens': [],
+            'top_log_probs': []
+        }
+
 
 # Utility functions for Ollama model management
 def list_popular_ollama_models() -> Dict[str, Dict[str, Any]]:

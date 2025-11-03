@@ -164,6 +164,116 @@ class OpenAILLM(BaseLLM):
         self.usage_stats.estimated_cost_usd = total_cost
         return total_cost
 
+    def generate_with_log_probs(self, prompt: str, max_tokens: int = 150,
+                                 temperature: Optional[float] = None) -> Dict[str, Any]:
+        """
+        Generate text and return log probabilities for each token.
+
+        Args:
+            prompt: Input prompt for generation
+            max_tokens: Maximum tokens to generate
+            temperature: Override default temperature
+
+        Returns:
+            Dictionary containing:
+                - 'text': Generated text
+                - 'log_probs': List of log probabilities for each generated token
+                - 'tokens': List of generated tokens (as strings)
+                - 'top_log_probs': List of dicts with top-k tokens and their log probs
+        """
+        try:
+            temp = temperature if temperature is not None else self.temperature
+
+            response = self.client.chat.completions.create(
+                model=self.model,
+                messages=[
+                    {"role": "system", "content": "You are a helpful assistant that provides clear, step-by-step mathematical reasoning."},
+                    {"role": "user", "content": prompt}
+                ],
+                max_completion_tokens=max_tokens,
+                temperature=temp,
+                top_p=1.0,
+                frequency_penalty=0.0,
+                presence_penalty=0.0,
+                logprobs=True,  # Request log probabilities
+                top_logprobs=5   # Get top 5 alternative tokens at each position
+            )
+
+            # Update usage tracking
+            if hasattr(response, 'usage') and response.usage:
+                self.usage_stats.total_tokens += response.usage.total_tokens
+                if hasattr(response.usage, 'prompt_tokens'):
+                    self.usage_stats.input_tokens += response.usage.prompt_tokens
+                if hasattr(response.usage, 'completion_tokens'):
+                    self.usage_stats.output_tokens += response.usage.completion_tokens
+
+            self.usage_stats.total_requests += 1
+
+            # Extract generated text
+            content = response.choices[0].message.content.strip()
+
+            # Extract log probabilities
+            log_probs = []
+            tokens = []
+            top_log_probs = []
+
+            if hasattr(response.choices[0], 'logprobs') and response.choices[0].logprobs:
+                logprobs_data = response.choices[0].logprobs
+                if hasattr(logprobs_data, 'content') and logprobs_data.content:
+                    for token_data in logprobs_data.content:
+                        # Get the token that was generated
+                        tokens.append(token_data.token)
+                        log_probs.append(token_data.logprob)
+
+                        # Get top alternative tokens
+                        if hasattr(token_data, 'top_logprobs') and token_data.top_logprobs:
+                            top_k_dict = {
+                                alt.token: alt.logprob
+                                for alt in token_data.top_logprobs
+                            }
+                            top_log_probs.append(top_k_dict)
+                        else:
+                            top_log_probs.append({})
+
+            return {
+                'text': content,
+                'log_probs': log_probs,
+                'tokens': tokens,
+                'top_log_probs': top_log_probs
+            }
+
+        except openai.RateLimitError as e:
+            print(f"Rate limit exceeded: {e}")
+            print("Waiting 60 seconds before retry...")
+            time.sleep(60)
+            raise
+
+        except openai.APITimeoutError as e:
+            print(f"API timeout: {e}")
+            raise
+
+        except openai.APIError as e:
+            print(f"OpenAI API error: {e}")
+            # Fallback to regular generation
+            text = self.generate(prompt, max_tokens, temperature)
+            return {
+                'text': text,
+                'log_probs': [],
+                'tokens': [],
+                'top_log_probs': []
+            }
+
+        except Exception as e:
+            print(f"Unexpected error in generation with log probs: {e}")
+            # Fallback to regular generation
+            text = self.generate(prompt, max_tokens, temperature)
+            return {
+                'text': text,
+                'log_probs': [],
+                'tokens': [],
+                'top_log_probs': []
+            }
+
     def get_model_info(self) -> Dict[str, Any]:
         """Get OpenAI-specific model information."""
         info = super().get_model_info()

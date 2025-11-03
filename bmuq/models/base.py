@@ -78,6 +78,35 @@ class BaseLLM(ABC):
         """Estimate cost in USD based on current usage."""
         pass
 
+    def generate_with_log_probs(self, prompt: str, max_tokens: int = 150,
+                                 temperature: Optional[float] = None) -> Dict[str, Any]:
+        """
+        Generate text and return log probabilities for each token.
+
+        Args:
+            prompt: Input prompt for generation
+            max_tokens: Maximum tokens to generate
+            temperature: Override default temperature
+
+        Returns:
+            Dictionary containing:
+                - 'text': Generated text
+                - 'log_probs': List of log probabilities for each generated token
+                - 'tokens': List of generated tokens
+                - 'top_log_probs': Optional list of top-k log probs per position
+
+        Note: This method should be overridden by subclasses that support
+        log probability extraction. Default implementation returns empty log probs.
+        """
+        # Default implementation: generate text without log probs
+        text = self.generate(prompt, max_tokens, temperature)
+        return {
+            'text': text,
+            'log_probs': [],
+            'tokens': [],
+            'top_log_probs': []
+        }
+
     def get_model_info(self) -> Dict[str, Any]:
         """Get model information and configuration."""
         return {

@@ -509,6 +509,22 @@ class BMUqBenchmark:
                 raise ValueError(
                     "Requests library not installed. Install with: pip install requests"
                 )
+        elif llm_config.provider == "vllm":
+            try:
+                from ..models.vllm_llm import VLLMLLM
+
+                return VLLMLLM(
+                    model=llm_config.model,
+                    temperature=llm_config.temperature,
+                    max_retries=llm_config.max_retries,
+                    max_tokens=llm_config.max_tokens,
+                    top_logprobs=llm_config.top_logprobs,
+                )
+            except ImportError:
+                raise ValueError(
+                    "vLLM library not installed. Install with: pip install vllm transformers torch"
+                )
+
         elif llm_config.provider == "mock":
             from ..models.mock_llm import MockLLM
 
@@ -600,7 +616,26 @@ class BMUqBenchmark:
                 featurizer_model=featurizer_model,
                 scoring_method=scoring_method,
             )
+        elif method_name == "token_probability_based":
+            extra_params = self.config.uncertainty.extra_params
+            scoring_method = extra_params.get("scoring_method", "perplexity")
 
+            from ..uncertainty.token_probability_uq import (
+                create_perplexity_uq,
+                create_mean_log_prob_uq,
+                create_token_entropy_uq,
+            )
+
+            if scoring_method == "perplexity":
+                uncertainty = create_perplexity_uq(self.llm)
+            elif scoring_method == "mean_log_prob":
+                uncertainty = create_mean_log_prob_uq(self.llm)
+            elif scoring_method == "token_entropy":
+                uncertainty = create_token_entropy_uq(self.llm)
+            else:
+                raise ValueError(
+                    f"Unsupported token probability scoring method: {scoring_method}"
+                )
         else:
             raise ValueError(f"Unsupported uncertainty method: {method_name}")
 

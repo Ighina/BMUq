@@ -17,6 +17,14 @@ from .coherence_uq import (
     create_relative_coherence_uq,
 )
 from .prmbased_uq import PRMBasedUQ
+from .token_probability_uq import (
+    PerplexityBasedUQ,
+    MeanLogProbUQ,
+    TokenEntropyBasedUQ,
+    create_perplexity_uq,
+    create_mean_log_prob_uq,
+    create_token_entropy_uq,
+)
 from .weighted_aggregation import (
     WeightedAnswerAggregator,
     WeightedUncertaintyMethod,
@@ -48,6 +56,13 @@ __all__ = [
     "RelativeCoherenceBasedUQ",
     "create_relative_coherence_uq",
     "PRMBasedUQ",
+    # Token probability-based methods
+    "PerplexityBasedUQ",
+    "MeanLogProbUQ",
+    "TokenEntropyBasedUQ",
+    "create_perplexity_uq",
+    "create_mean_log_prob_uq",
+    "create_token_entropy_uq",
     # Weighted aggregation components
     "WeightedAnswerAggregator",
     "WeightedUncertaintyMethod",

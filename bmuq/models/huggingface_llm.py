@@ -430,10 +430,137 @@ class HuggingFaceLLM(BaseLLM):
             torch.cuda.empty_cache()
             logger.info("CUDA cache cleared")
 
+    def generate_with_log_probs(self, prompt: str, max_tokens: int = 150,
+                                 temperature: Optional[float] = None) -> Dict[str, Any]:
+        """
+        Generate text and return log probabilities for each token.
+
+        Args:
+            prompt: Input prompt for generation
+            max_tokens: Maximum tokens to generate
+            temperature: Override default temperature
+
+        Returns:
+            Dictionary containing:
+                - 'text': Generated text
+                - 'log_probs': List of log probabilities for each generated token
+                - 'tokens': List of generated tokens (as strings)
+                - 'top_log_probs': List of dicts with top-k tokens and their log probs
+        """
+        if self.model is None or self.tokenizer is None:
+            raise RuntimeError("Model not loaded. Call _load_model() first.")
+
+        temp = temperature if temperature is not None else self.temperature
+        max_tokens = min(max_tokens, self.max_new_tokens)
+
+        try:
+            # Format prompt based on model type
+            if self.model_type == 'causal':
+                formatted_prompt = f"You are a helpful assistant that provides clear, step-by-step mathematical reasoning.\n\nUser: {prompt}\n\nAssistant:"
+            else:
+                formatted_prompt = prompt
+
+            # Tokenize input
+            inputs = self.tokenizer(
+                formatted_prompt,
+                return_tensors="pt",
+                padding=True,
+                truncation=True
+            )
+
+            # Move to device
+            if self.device == "cuda":
+                inputs = {k: v.to(self.device) for k, v in inputs.items()}
+
+            # Generate with output scores to get logits
+            with torch.no_grad():
+                outputs = self.model.generate(
+                    **inputs,
+                    max_new_tokens=max_tokens,
+                    temperature=temp,
+                    do_sample=temp > 0,
+                    pad_token_id=self.tokenizer.pad_token_id,
+                    eos_token_id=self.tokenizer.eos_token_id,
+                    return_dict_in_generate=True,
+                    output_scores=True  # This returns logits for each generated token
+                )
+
+            # Extract generated sequence
+            generated_ids = outputs.sequences[0]
+            input_length = inputs['input_ids'].shape[1]
+            generated_ids = generated_ids[input_length:]  # Remove input tokens
+
+            # Decode generated text
+            generated_text = self.tokenizer.decode(generated_ids, skip_special_tokens=True).strip()
+
+            # Extract log probabilities from scores
+            log_probs = []
+            tokens = []
+            top_log_probs = []
+
+            if hasattr(outputs, 'scores') and outputs.scores:
+                for i, scores in enumerate(outputs.scores):
+                    # scores is a tensor of shape [batch_size, vocab_size]
+                    # Convert logits to log probabilities
+                    log_probs_all = torch.nn.functional.log_softmax(scores[0], dim=-1)
+
+                    # Get the token that was actually generated
+                    if i < len(generated_ids):
+                        generated_token_id = generated_ids[i].item()
+                        token_log_prob = log_probs_all[generated_token_id].item()
+                        token_text = self.tokenizer.decode([generated_token_id])
+
+                        log_probs.append(token_log_prob)
+                        tokens.append(token_text)
+
+                        # Get top-5 tokens and their log probs
+                        top_k_log_probs, top_k_indices = torch.topk(log_probs_all, k=5)
+                        top_k_dict = {
+                            self.tokenizer.decode([idx.item()]): log_prob.item()
+                            for idx, log_prob in zip(top_k_indices, top_k_log_probs)
+                        }
+                        top_log_probs.append(top_k_dict)
+
+            # Update usage statistics
+            input_tokens = inputs['input_ids'].shape[1]
+            output_tokens = len(generated_ids)
+
+            self.usage_stats.total_requests += 1
+            self.usage_stats.input_tokens += input_tokens
+            self.usage_stats.output_tokens += output_tokens
+            self.usage_stats.total_tokens += input_tokens + output_tokens
+
+            self.generation_stats['total_generations'] += 1
+            self.generation_stats['total_input_tokens'] += input_tokens
+            self.generation_stats['total_output_tokens'] += output_tokens
+
+            # Update CUDA memory stats
+            if self.device == "cuda" and torch.cuda.is_available():
+                self.generation_stats['cuda_memory_allocated'] = torch.cuda.memory_allocated()
+                self.generation_stats['cuda_memory_cached'] = torch.cuda.memory_reserved()
+
+            return {
+                'text': generated_text,
+                'log_probs': log_probs,
+                'tokens': tokens,
+                'top_log_probs': top_log_probs
+            }
+
+        except Exception as e:
+            logger.error(f"Generation with log probs failed: {e}")
+            # Fallback to regular generation
+            text = self.generate(prompt, max_tokens, temperature)
+            return {
+                'text': text,
+                'log_probs': [],
+                'tokens': [],
+                'top_log_probs': []
+            }
+
     def get_memory_usage(self) -> Dict[str, float]:
         """Get current memory usage statistics."""
         memory_info = {}
-        
+
         if self.device == "cuda" and torch.cuda.is_available():
             memory_info = {
                 "allocated_gb": torch.cuda.memory_allocated() / 1e9,
@@ -441,7 +568,7 @@ class HuggingFaceLLM(BaseLLM):
                 "total_gb": torch.cuda.get_device_properties(0).total_memory / 1e9
             }
             memory_info["utilization"] = memory_info["allocated_gb"] / memory_info["total_gb"]
-        
+
         return memory_info
 
     def __del__(self):
