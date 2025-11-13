@@ -44,7 +44,8 @@ class VLLMLLM(BaseLLM):
                  top_logprobs: int = 5,
                  max_num_seqs: int = 256,
                  enforce_eager: bool = False,
-                 dtype: str = "auto"):
+                 dtype: str = "auto",
+                 omni_model: bool = False):
         """
         Initialize vLLM model.
 
@@ -79,6 +80,18 @@ class VLLMLLM(BaseLLM):
         self.max_num_seqs = max_num_seqs
         self.enforce_eager = enforce_eager
         self.dtype = dtype
+        self.omni_model = omni_model
+
+        if self.omni_model:
+            assert self.model_name.startswith("Qwen/Qwen3-Omni"), "Only Qwen3-Omni is currently supported for multimodal interactions!"
+
+            from transformers import Qwen3OmniMoeProcessor
+            from qwen_omni_utils import process_mm_info
+
+            # vLLM engine v1 not supported yet
+            os.environ['VLLM_USE_V1'] = '0'
+
+            self.processor = Qwen3OmniMoeProcessor.from_pretrained(self.model_name)
 
         # Initialize the model
         self.llm = None
@@ -106,21 +119,36 @@ class VLLMLLM(BaseLLM):
             logger.info(f"CUDA device count: {torch.cuda.device_count()}")
             logger.info(f"CUDA device name: {torch.cuda.get_device_name()}")
 
-            # vLLM initialization parameters
-            llm_kwargs = {
-                'model': self.model_name,
-                'tensor_parallel_size': self.tensor_parallel_size,
-                'gpu_memory_utilization': self.gpu_memory_utilization,
-                'trust_remote_code': self.trust_remote_code,
-                'download_dir': self.download_dir,
-                'max_num_seqs': self.max_num_seqs,
-                'enforce_eager': self.enforce_eager,
-                'dtype': self.dtype,
-            }
+            if self.omni_model:
+                # Use the standard parameters from Qwen3-Omni repository
+                llm_kwargs = {
+                    'model': self.model_name,
+                    'tensor_parallel_size': torch.cuda.device_count(),
+                    'gpu_memory_utilization': 0.95,
+                    'trust_remote_code': True,
+                    'limit_mm_per_prompt': {'image': 3, 'video': 3, 'audio': 3},
+                    'download_dir': self.download_dir,
+                    'max_num_seqs': 8,
+                    'max_model_len': 32768,
+                    'seed': 1234,
+                }
 
-            # Add max_model_len only if specified
-            if self.max_model_len is not None:
-                llm_kwargs['max_model_len'] = self.max_model_len
+            else:
+                # vLLM initialization parameters
+                llm_kwargs = {
+                    'model': self.model_name,
+                    'tensor_parallel_size': self.tensor_parallel_size,
+                    'gpu_memory_utilization': self.gpu_memory_utilization,
+                    'trust_remote_code': self.trust_remote_code,
+                    'download_dir': self.download_dir,
+                    'max_num_seqs': self.max_num_seqs,
+                    'enforce_eager': self.enforce_eager,
+                    'dtype': self.dtype,
+                }
+
+                # Add max_model_len only if specified
+                if self.max_model_len is not None:
+                    llm_kwargs['max_model_len'] = self.max_model_len
 
             # Initialize vLLM
             self.llm = LLM(**llm_kwargs)
@@ -169,7 +197,8 @@ class VLLMLLM(BaseLLM):
 
     def generate(self, prompt: str, max_tokens: int = 150,
                 temperature: Optional[float] = None,
-                structured_output=None) -> str:
+                structured_output=None,
+                multimodal_input: List[List[str]] = []) -> str:
         """
         Generate text using vLLM.
 
@@ -178,6 +207,8 @@ class VLLMLLM(BaseLLM):
             max_tokens: Maximum tokens to generate
             temperature: Override default temperature
             structured_output: A Pydantic class defining the format of the output (not implemented yet)
+            multimodal_input: List of Lists of strings where each sublist is of the form [content_type, url] 
+                              defining the content type and the location of the multimodal input
 
         Returns:
             Generated text response
@@ -189,11 +220,63 @@ class VLLMLLM(BaseLLM):
             raise RuntimeError("Model not loaded. Call _load_model() first.")
 
         try:
-            # Format prompt
-            formatted_prompt = f"You are a helpful assistant that provides clear, step-by-step mathematical reasoning.\n\nUser: {prompt}\n\nAssistant:"
 
-            # Create sampling parameters
-            sampling_params = self._create_sampling_params(max_tokens, temperature, include_logprobs=False)
+            if self.omni_model:
+                system_prompt = "You are a helpful assistant that receives multimodal input and provides clear, step-by-step answers to the main textual question based on all input modalities."
+
+                messages = [
+                    {
+                        "role": "system",
+                        "content": [{"type": "text", "text": system_prompt}]
+                    },
+                    {
+                        "role": "user",
+                        "content": [
+                            {"type": "text", "text": prompt},
+                        ], 
+                    }
+                ]
+
+                # TODO: For now I am including url for the multimodal input. but in case it fails check this part
+
+                for mi in multimodal_input:
+                    # multimodal inputs should be of the form [content_type, url]
+                    content_type, url = mi
+                    assert content_type in ["audio", "image", "video"], "content type should be one of 'audio', 'image' or 'video'"
+
+                    messages[1]["content"].append({"type": content_type, "url": url})
+
+                text = self.processor.apply_chat_template(
+                    messages,
+                    tokenize=False,
+                    add_generation_prompt=True,
+                )
+                audios, images, videos = process_mm_info(messages, use_audio_in_video=True)
+
+                formatted_prompt = {
+                    'prompt': text,
+                    'multi_modal_data': {},
+                    "mm_processor_kwargs": {
+                        "use_audio_in_video": True,
+                    },
+                }
+
+                if images is not None:
+                    formatted_prompt['multi_modal_data']['image'] = images
+                if videos is not None:
+                    formatted_prompt['multi_modal_data']['video'] = videos
+                if audios is not None:
+                    formatted_prompt['multi_modal_data']['audio'] = audios
+
+                # Create sampling parameters
+                sampling_params = self._create_sampling_params(temperature, include_logprobs=False)
+
+            else:
+                # Format prompt
+                formatted_prompt = f"You are a helpful assistant that provides clear, step-by-step mathematical reasoning.\n\nUser: {prompt}\n\nAssistant:"
+
+                # Create sampling parameters
+                sampling_params = self._create_sampling_params(max_tokens, temperature, include_logprobs=False)
 
             # Generate
             outputs = self.llm.generate([formatted_prompt], sampling_params)
@@ -250,6 +333,9 @@ class VLLMLLM(BaseLLM):
 
         try:
             # Format prompts
+            if self.omni_model:
+                raise NotImplementedError()
+            
             formatted_prompts = [
                 f"You are a helpful assistant that provides clear, step-by-step mathematical reasoning.\n\nUser: {prompt}\n\nAssistant:"
                 for prompt in prompts
@@ -311,11 +397,62 @@ class VLLMLLM(BaseLLM):
             raise RuntimeError("Model not loaded. Call _load_model() first.")
 
         try:
-            # Format prompt
-            formatted_prompt = f"You are a helpful assistant that provides clear, step-by-step mathematical reasoning.\n\nUser: {prompt}\n\nAssistant:"
+            if self.omni_model:
+                system_prompt = "You are a helpful assistant that receives multimodal input and provides clear, step-by-step answers to the main textual question based on all input modalities."
 
-            # Create sampling parameters with logprobs enabled
-            sampling_params = self._create_sampling_params(max_tokens, temperature, include_logprobs=True)
+                messages = [
+                    {
+                        "role": "system",
+                        "content": [{"type": "text", "text": system_prompt}]
+                    },
+                    {
+                        "role": "user",
+                        "content": [
+                            {"type": "text", "text": prompt},
+                        ], 
+                    }
+                ]
+
+                # TODO: For now I am including url for the multimodal input. but in case it fails check this part
+
+                for mi in multimodal_input:
+                    # multimodal inputs should be of the form [content_type, url]
+                    content_type, url = mi
+                    assert content_type in ["audio", "image", "video"], "content type should be one of 'audio', 'image' or 'video'"
+
+                    messages[1]["content"].append({"type": content_type, "url": url})
+
+                text = self.processor.apply_chat_template(
+                    messages,
+                    tokenize=False,
+                    add_generation_prompt=True,
+                )
+                audios, images, videos = process_mm_info(messages, use_audio_in_video=True)
+
+                formatted_prompt = {
+                    'prompt': text,
+                    'multi_modal_data': {},
+                    "mm_processor_kwargs": {
+                        "use_audio_in_video": True,
+                    },
+                }
+
+                if images is not None:
+                    formatted_prompt['multi_modal_data']['image'] = images
+                if videos is not None:
+                    formatted_prompt['multi_modal_data']['video'] = videos
+                if audios is not None:
+                    formatted_prompt['multi_modal_data']['audio'] = audios
+
+                # Create sampling parameters
+                sampling_params = self._create_sampling_params(temperature, include_logprobs=True)
+
+            else:
+                # Format prompt
+                formatted_prompt = f"You are a helpful assistant that provides clear, step-by-step mathematical reasoning.\n\nUser: {prompt}\n\nAssistant:"
+
+                # Create sampling parameters
+                sampling_params = self._create_sampling_params(max_tokens, temperature, include_logprobs=True)
 
             # Generate
             outputs = self.llm.generate([formatted_prompt], sampling_params)

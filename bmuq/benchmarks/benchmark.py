@@ -513,12 +513,15 @@ class BMUqBenchmark:
             try:
                 from ..models.vllm_llm import VLLMLLM
 
+                omni_model = llm_config.get("multimodal", False)
+
                 return VLLMLLM(
                     model=llm_config.model,
                     temperature=llm_config.temperature,
                     max_retries=llm_config.max_retries,
                     max_tokens=llm_config.max_tokens,
                     top_logprobs=llm_config.top_logprobs,
+                    omni_model=omni_model
                 )
             except ImportError:
                 raise ValueError(
